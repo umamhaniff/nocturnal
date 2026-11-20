@@ -39,6 +39,8 @@ Nocturnal/
 ├── README.md
 ├── Nocturnal.sln
 ├── assets/                     # Crescent Pulse SVG brand assets (active & off)
+├── installer/                  # Inno Setup 6 script (Nocturnal.iss -> dist/Nocturnal-Setup-1.0.0.exe)
+├── scripts/                    # Installer build automation (build-installer.ps1)
 ├── src/
 │   ├── Nocturnal.Core/         # Pure domain models, safety rules, session engine
 │   └── Nocturnal.App/          # WPF + Tray Application, Assets/nocturnal.ico & Power Engine
@@ -52,6 +54,7 @@ Nocturnal/
 
 ```powershell
 dotnet build
-dotnet test
+dotnet run --project tests/Nocturnal.Tests
+.\scripts\build-installer.ps1
 dotnet publish src/Nocturnal.App -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true
 ```

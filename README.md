@@ -32,7 +32,17 @@ dotnet build Nocturnal.sln
 dotnet run --project src/Nocturnal.App
 ```
 
-### Publish Single-File `.exe`
+### Build Windows Installer (Self-Contained `win-x64`)
+
+Requires [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`):
+
+```powershell
+.\scripts\build-installer.ps1
+```
+
+Outputs `dist\Nocturnal-Setup-1.0.0.exe` (registers Start Menu shortcut, Installed Apps entry, optional autostart, and uninstaller without requiring a pre-installed .NET runtime).
+
+### Publish Portable Single-File `.exe`
 
 ```powershell
 dotnet publish src/Nocturnal.App -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o publish
