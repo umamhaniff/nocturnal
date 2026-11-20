@@ -43,6 +43,8 @@ public partial class App : System.Windows.Application
         _engine.Tick();
 
         SystemEvents.SessionEnding += OnSessionEnding;
+        SessionEnding += (_, _) => ExitApplication();
+        Exit += (_, _) => SafeRestoreOnCrash();
         DispatcherUnhandledException += (_, _) => SafeRestoreOnCrash();
         AppDomain.CurrentDomain.UnhandledException += (_, _) => SafeRestoreOnCrash();
 
@@ -115,7 +117,7 @@ public partial class App : System.Windows.Application
         _timer?.Stop();
         _engine?.Stop(StopReason.AppExiting);
         _trayIcon?.Dispose();
-        _popup?.Close();
+        _popup?.ForceClose();
         _singleInstanceMutex?.ReleaseMutex();
         _singleInstanceMutex?.Dispose();
         Shutdown();

@@ -8,6 +8,12 @@ public static class StartupManager
     private const string RunKeyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
     private const string AppName = "Nocturnal";
 
+    public static bool IsLaunchAtStartupEnabled()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
+        return key?.GetValue(AppName) is string value && !string.IsNullOrWhiteSpace(value);
+    }
+
     public static void SetLaunchAtStartup(bool enabled)
     {
         using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);

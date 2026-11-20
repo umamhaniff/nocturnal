@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -20,6 +21,7 @@ public partial class MainPopupWindow : Window
     private readonly SessionEngine _engine;
     private readonly Action _exitApp;
     private bool _isInitializing = true;
+    private bool _allowClose;
 
     private static SolidColorBrush CreateFrozenBrush(byte r, byte g, byte b)
     {
@@ -34,6 +36,14 @@ public partial class MainPopupWindow : Window
         _exitApp = exitApp;
 
         InitializeComponent();
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape)
+            {
+                Hide();
+                e.Handled = true;
+            }
+        };
         SizeChanged += (_, _) =>
         {
             if (IsVisible)
@@ -43,6 +53,23 @@ public partial class MainPopupWindow : Window
         };
         SyncFromConfig();
         _isInitializing = false;
+    }
+
+    public void ForceClose()
+    {
+        _allowClose = true;
+        Close();
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!_allowClose)
+        {
+            e.Cancel = true;
+            Hide();
+            return;
+        }
+        base.OnClosing(e);
     }
 
     public void ToggleNearTray()
@@ -187,7 +214,7 @@ public partial class MainPopupWindow : Window
         AutoSleepSwitch.IsChecked = cfg.AutoSleepOnCompletion;
         KeepDisplaySwitch.IsChecked = cfg.KeepDisplayAwake;
         ThermalGuardSwitch.IsChecked = cfg.EnableThermalProtection;
-        StartupSwitch.IsChecked = cfg.LaunchAtStartup;
+        StartupSwitch.IsChecked = StartupManager.IsLaunchAtStartupEnabled();
 
         LowPowerPctBox.Text = cfg.LowPowerBatteryThresholdPercent.ToString();
         CriticalPctBox.Text = cfg.CriticalBatteryPercent.ToString();
