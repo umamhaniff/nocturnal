@@ -97,10 +97,18 @@ public partial class MainPopupWindow : Window
             return;
         }
 
+        ShowNearTray();
+    }
+
+    public void ShowNearTray()
+    {
         SyncFromConfig();
         UpdateStatus(_engine.GetStatus(), _engine.LatestSnapshot);
 
-        Show();
+        if (!IsVisible)
+        {
+            Show();
+        }
         RepositionNearTray();
         Activate();
     }

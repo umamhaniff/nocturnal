@@ -12,7 +12,15 @@ namespace Nocturnal.App;
 
 public partial class App : System.Windows.Application
 {
+    private const string SingleInstanceMutexName = "Nocturnal_SingleInstance_Mutex";
+    private const string ActivatePopupEventName = "Nocturnal_ActivatePopup_Event";
+    private const string GracefulExitEventName = "Nocturnal_GracefulExit_Event";
+
     private Mutex? _singleInstanceMutex;
+    private EventWaitHandle? _activatePopupEvent;
+    private EventWaitHandle? _gracefulExitEvent;
+    private RegisteredWaitHandle? _activatePopupWaitHandle;
+    private RegisteredWaitHandle? _gracefulExitWaitHandle;
     private SessionEngine? _engine;
     private AppUpdateService? _updateService;
     private TrayIconService? _trayIcon;
@@ -26,12 +34,37 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
-        _singleInstanceMutex = new Mutex(true, "Nocturnal_SingleInstance_Mutex", out var createdNew);
+        _singleInstanceMutex = new Mutex(true, SingleInstanceMutexName, out var createdNew);
         if (!createdNew)
         {
+            try
+            {
+                using var activateEvent = EventWaitHandle.OpenExisting(ActivatePopupEventName);
+                activateEvent.Set();
+            }
+            catch
+            {
+                // Older instance or already exiting.
+            }
+
             Shutdown();
             return;
         }
+
+        _activatePopupEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivatePopupEventName);
+        _gracefulExitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, GracefulExitEventName);
+        _activatePopupWaitHandle = ThreadPool.RegisterWaitForSingleObject(
+            _activatePopupEvent,
+            (_, _) => Dispatcher.BeginInvoke(() => _popup?.ShowNearTray()),
+            null,
+            Timeout.Infinite,
+            executeOnlyOnce: false);
+        _gracefulExitWaitHandle = ThreadPool.RegisterWaitForSingleObject(
+            _gracefulExitEvent,
+            (_, _) => Dispatcher.BeginInvoke(ExitApplication),
+            null,
+            Timeout.Infinite,
+            executeOnlyOnce: true);
 
         _updateService = new AppUpdateService();
         _updateService.CleanupStaleUpdateFiles();
@@ -119,6 +152,13 @@ public partial class App : System.Windows.Application
         _updateTimer.Start();
 
         _trayIcon.Update(_engine.GetStatus());
+
+        var startMinimized = e.Args.Any(arg =>
+            string.Equals(arg, "--minimized", StringComparison.OrdinalIgnoreCase));
+        if (!startMinimized)
+        {
+            Dispatcher.BeginInvoke(() => _popup.ShowNearTray(), DispatcherPriority.ApplicationIdle);
+        }
     }
 
     private void OnSessionEnding(object? sender, SessionEndingEventArgs e) => ExitApplication();
@@ -150,6 +190,10 @@ public partial class App : System.Windows.Application
         _isExiting = true;
 
         SystemEvents.SessionEnding -= OnSessionEnding;
+        _activatePopupWaitHandle?.Unregister(null);
+        _gracefulExitWaitHandle?.Unregister(null);
+        _activatePopupEvent?.Dispose();
+        _gracefulExitEvent?.Dispose();
         _timer?.Stop();
         _updateTimer?.Stop();
         _engine?.Stop(StopReason.AppExiting);

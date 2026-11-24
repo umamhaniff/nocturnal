@@ -41,7 +41,7 @@ Nocturnal/
 ├── Nocturnal.sln
 ├── assets/                     # Crescent Pulse SVG brand assets (active & off)
 ├── .github/                    # GitHub FUNDING.yml (Trakteer)
-├── installer/                  # Inno Setup 6 script (Nocturnal.iss -> dist/Nocturnal-Setup-1.1.0.exe)
+├── installer/                  # Inno Setup 6 script (Nocturnal.iss -> dist/Nocturnal-Setup-1.1.1.exe)
 ├── scripts/                    # Installer build automation (build-installer.ps1)
 ├── src/
 │   ├── Nocturnal.Core/         # Pure domain models, safety rules, session engine

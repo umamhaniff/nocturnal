@@ -102,13 +102,13 @@ Start Session
 ## Installation
 
 ### Option 1: Windows Installer (Recommended — No .NET Runtime Required)
-1. Download the latest `Nocturnal-Setup-1.1.0.exe` from [**GitHub Releases**](https://github.com/umamhaniff/nocturnal/releases/latest).
+1. Download the latest `Nocturnal-Setup-1.1.1.exe` from [**GitHub Releases**](https://github.com/umamhaniff/nocturnal/releases/latest).
 2. Run the installer—installs per-user by default (no administrator prompt required), registers a Start Menu shortcut, optional startup autostart, and a clean uninstaller.
 
 Silent per-user installation / upgrade:
 
 ```powershell
-.\Nocturnal-Setup-1.1.0.exe /VERYSILENT /CURRENTUSER
+.\Nocturnal-Setup-1.1.1.exe /VERYSILENT /CURRENTUSER
 ```
 
 ### Option 2: Portable / Build from Source
@@ -128,7 +128,7 @@ dotnet run --project tests/Nocturnal.Tests
 # Run from source
 dotnet run --project src/Nocturnal.App
 
-# Build self-contained win-x64 installer -> dist\Nocturnal-Setup-1.1.0.exe
+# Build self-contained win-x64 installer -> dist\Nocturnal-Setup-1.1.1.exe
 .\scripts\build-installer.ps1
 
 # Or publish framework-dependent single-file portable executable

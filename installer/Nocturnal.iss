@@ -1,5 +1,5 @@
 #define MyAppName "Nocturnal"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppPublisher "Hans x Gravi"
 #define MyAppURL "https://github.com/umamhaniff/nocturnal"
 #define MyAppExeName "Nocturnal.exe"
@@ -60,13 +60,59 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFile
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
-Root: HKCU; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: autostart
+Root: HKCU; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"" --minimized"; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
 Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: ShouldRelaunchAfterSilentUpdate
 
 [Code]
+const
+  EVENT_MODIFY_STATE = $0002;
+
+function OpenEventW(dwDesiredAccess: DWORD; bInheritHandle: BOOL; lpName: string): THandle;
+  external 'OpenEventW@kernel32.dll stdcall';
+function SetEvent(hEvent: THandle): BOOL;
+  external 'SetEvent@kernel32.dll stdcall';
+function CloseHandle(hObject: THandle): BOOL;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+function InitializeSetup(): Boolean;
+var
+  hEvent: THandle;
+  WaitMs: Integer;
+  ResultCode: Integer;
+begin
+  if CheckForMutexes('Nocturnal_SingleInstance_Mutex') then
+  begin
+    hEvent := OpenEventW(EVENT_MODIFY_STATE, False, 'Nocturnal_GracefulExit_Event');
+    if hEvent <> 0 then
+    begin
+      SetEvent(hEvent);
+      CloseHandle(hEvent);
+    end;
+
+    WaitMs := 0;
+    while CheckForMutexes('Nocturnal_SingleInstance_Mutex') and (WaitMs < 2500) do
+    begin
+      Sleep(100);
+      WaitMs := WaitMs + 100;
+    end;
+
+    if CheckForMutexes('Nocturnal_SingleInstance_Mutex') then
+    begin
+      Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Nocturnal.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      WaitMs := 0;
+      while CheckForMutexes('Nocturnal_SingleInstance_Mutex') and (WaitMs < 1500) do
+      begin
+        Sleep(100);
+        WaitMs := WaitMs + 100;
+      end;
+    end;
+  end;
+  Result := True;
+end;
+
 function ShouldRelaunchAfterSilentUpdate: Boolean;
 begin
   Result := WizardSilent and (ExpandConstant('{param:RELAUNCH|0}') = '1');

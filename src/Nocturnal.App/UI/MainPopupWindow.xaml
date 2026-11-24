@@ -798,7 +798,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
-                                <TextBlock x:Name="VersionText" Text="Nocturnal v1.1.0" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                                <TextBlock x:Name="VersionText" Text="Nocturnal v1.1.1" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
                                 <TextBlock x:Name="UpdateStatusText" Text="Check GitHub Releases" FontSize="10.5" Foreground="#64748B" />
                             </StackPanel>
                             <Button x:Name="CheckUpdateBtn"

@@ -27,7 +27,7 @@ public static class StartupManager
             var exePath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
             if (!string.IsNullOrWhiteSpace(exePath))
             {
-                key.SetValue(AppName, $"\"{exePath}\"");
+                key.SetValue(AppName, $"\"{exePath}\" --minimized");
             }
         }
         else
