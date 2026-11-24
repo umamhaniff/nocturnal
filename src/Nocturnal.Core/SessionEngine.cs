@@ -59,6 +59,11 @@ public sealed class SessionEngine
             _power.TrySetPowerSaver(false);
         }
 
+        if (stale.SuspendedProcesses is { Count: > 0 })
+        {
+            _focus.RecoverSuspended(stale.SuspendedProcesses);
+        }
+
         _focus.Restore();
         _activeFocus = FocusReport.Empty;
 
@@ -107,6 +112,16 @@ public sealed class SessionEngine
         _activeFocus = Config.AgentFocusEnabled
             ? _focus.Engage(Config)
             : FocusReport.Empty;
+
+        if (Config.AgentFocusEnabled)
+        {
+            var suspended = _focus.GetSuspendedProcesses();
+            if (suspended.Count > 0)
+            {
+                _activeJournal = _activeJournal with { SuspendedProcesses = suspended };
+                _journal.Save(_activeJournal);
+            }
+        }
 
         LatestSnapshot = _monitor.GetSnapshot();
         NotifyChanged();
@@ -192,11 +207,18 @@ public sealed class SessionEngine
             if (enabled)
             {
                 _activeFocus = _focus.Engage(Config);
+                _activeJournal = _activeJournal with
+                {
+                    SuspendedProcesses = _focus.GetSuspendedProcesses()
+                };
+                _journal.Save(_activeJournal);
             }
             else
             {
                 _focus.Restore();
                 _activeFocus = FocusReport.Empty;
+                _activeJournal = _activeJournal with { SuspendedProcesses = null };
+                _journal.Save(_activeJournal);
             }
         }
 
@@ -212,6 +234,11 @@ public sealed class SessionEngine
 
         _focus.Restore();
         _activeFocus = _focus.Engage(Config);
+        _activeJournal = _activeJournal with
+        {
+            SuspendedProcesses = _focus.GetSuspendedProcesses()
+        };
+        _journal.Save(_activeJournal);
         NotifyChanged();
     }
 

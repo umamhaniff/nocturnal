@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -11,6 +12,8 @@ namespace Nocturnal.App.UI;
 
 public partial class MainPopupWindow : Window
 {
+    private const string GitHubRepoUrl = "https://github.com/umamhaniff/nocturnal";
+    private const string SupportCoffeeUrl = "https://trakteer.id/umamhaniff/tip";
     private static readonly SolidColorBrush ActiveCrescentBrush = CreateFrozenBrush(0x34, 0xD3, 0x99);
     private static readonly SolidColorBrush ActivePulseBrush = CreateFrozenBrush(0xEC, 0xFD, 0xF5);
     private static readonly SolidColorBrush InactiveCrescentBrush = CreateFrozenBrush(0x64, 0x74, 0x8B);
@@ -19,7 +22,10 @@ public partial class MainPopupWindow : Window
     private static readonly SolidColorBrush IdleHeaderTextBrush = CreateFrozenBrush(0x64, 0x74, 0x8B);
 
     private readonly SessionEngine _engine;
+    private readonly AppUpdateService _updateService;
     private readonly Action _exitApp;
+    private readonly Action _prepareForInstallerExit;
+    private readonly Action _finalizeExit;
     private bool _isInitializing = true;
     private bool _allowClose;
 
@@ -30,12 +36,21 @@ public partial class MainPopupWindow : Window
         return brush;
     }
 
-    public MainPopupWindow(SessionEngine engine, Action exitApp)
+    public MainPopupWindow(
+        SessionEngine engine,
+        AppUpdateService updateService,
+        Action exitApp,
+        Action prepareForInstallerExit,
+        Action finalizeExit)
     {
         _engine = engine;
+        _updateService = updateService;
         _exitApp = exitApp;
+        _prepareForInstallerExit = prepareForInstallerExit;
+        _finalizeExit = finalizeExit;
 
         InitializeComponent();
+        _updateService.StateChanged += OnUpdateStateChanged;
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape)
@@ -52,6 +67,7 @@ public partial class MainPopupWindow : Window
             }
         };
         SyncFromConfig();
+        ApplyUpdateState(_updateService.State);
         _isInitializing = false;
     }
 
@@ -69,6 +85,7 @@ public partial class MainPopupWindow : Window
             Hide();
             return;
         }
+        _updateService.StateChanged -= OnUpdateStateChanged;
         base.OnClosing(e);
     }
 
@@ -159,6 +176,10 @@ public partial class MainPopupWindow : Window
         }
 
         var parts = new List<string> { $"{status.Focus.ThrottledProcessCount} throttled" };
+        if (status.Focus.PausedProcessCount > 0)
+        {
+            parts.Add($"{status.Focus.PausedProcessCount} paused");
+        }
         if (status.Focus.ClosedAppCount > 0)
         {
             parts.Add($"{status.Focus.ClosedAppCount} closed");
@@ -209,20 +230,29 @@ public partial class MainPopupWindow : Window
         ClamshellSwitch.IsChecked = cfg.ClamshellEnabled;
         AgentFocusSwitch.IsChecked = cfg.AgentFocusEnabled;
         EcoQosSwitch.IsChecked = cfg.FocusEcoQosEnabled;
-        CloseAppsSwitch.IsChecked = cfg.FocusCloseSelectedApps;
+
+        var effectiveMode = cfg.FocusSelectedAppMode != SelectedAppMode.Off
+            ? cfg.FocusSelectedAppMode
+            : (cfg.FocusCloseSelectedApps ? SelectedAppMode.GracefulClose : SelectedAppMode.Off);
+        ModeOffRadio.IsChecked = effectiveMode == SelectedAppMode.Off;
+        ModePauseRadio.IsChecked = effectiveMode == SelectedAppMode.DeepPause;
+        ModeCloseRadio.IsChecked = effectiveMode == SelectedAppMode.GracefulClose;
 
         AutoSleepSwitch.IsChecked = cfg.AutoSleepOnCompletion;
         KeepDisplaySwitch.IsChecked = cfg.KeepDisplayAwake;
         ThermalGuardSwitch.IsChecked = cfg.EnableThermalProtection;
         StartupSwitch.IsChecked = StartupManager.IsLaunchAtStartupEnabled();
+        AutoUpdateSwitch.IsChecked = cfg.AutoCheckForUpdates;
 
         LowPowerPctBox.Text = cfg.LowPowerBatteryThresholdPercent.ToString();
         CriticalPctBox.Text = cfg.CriticalBatteryPercent.ToString();
+        CustomAppsBox.Text = string.Join(", ", cfg.CustomAppsToManage);
         CustomWhitelistBox.Text = string.Join(", ", cfg.CustomAgentWhitelist);
 
         SyncAppChips(cfg);
         SyncStyleRadios(cfg.UiStyle);
         ApplyUiStyleLayout(cfg.UiStyle);
+        ApplyUpdateState(_updateService.State);
 
         _isInitializing = false;
     }
@@ -257,6 +287,7 @@ public partial class MainPopupWindow : Window
         TabBarBorder.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
         CustomDurationPanel.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
         CompactSettingsBtn.Visibility = isCompact ? Visibility.Visible : Visibility.Collapsed;
+        CommunityFooterBorder.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
 
         if (isCompact)
         {
@@ -339,13 +370,53 @@ public partial class MainPopupWindow : Window
 
     private void EcoQosSwitch_Click(object sender, RoutedEventArgs e)
     {
-        _engine.UpdateConfig(c => c.FocusEcoQosEnabled = EcoQosSwitch.IsChecked == true);
+        var enabled = EcoQosSwitch.IsChecked == true;
+        _engine.UpdateConfig(c =>
+        {
+            c.FocusEcoQosEnabled = enabled;
+            c.FocusRamTrimEnabled = enabled;
+        });
         _engine.ReapplyAgentFocusIfActive();
     }
 
-    private void CloseAppsSwitch_Click(object sender, RoutedEventArgs e)
+    private void SelectedAppModeRadio_Checked(object sender, RoutedEventArgs e)
     {
-        _engine.UpdateConfig(c => c.FocusCloseSelectedApps = CloseAppsSwitch.IsChecked == true);
+        if (_isInitializing || sender is not System.Windows.Controls.RadioButton radio || radio.Tag is not string tag)
+        {
+            return;
+        }
+
+        if (Enum.TryParse<SelectedAppMode>(tag, out var mode))
+        {
+            _engine.UpdateConfig(c =>
+            {
+                c.FocusSelectedAppMode = mode;
+                c.FocusCloseSelectedApps = mode == SelectedAppMode.GracefulClose;
+            });
+            _engine.ReapplyAgentFocusIfActive();
+        }
+    }
+
+    private void SaveCustomApps_Click(object sender, RoutedEventArgs e) => SaveCustomApps();
+    private void CustomAppsBox_LostFocus(object sender, RoutedEventArgs e) => SaveCustomApps();
+
+    private void CustomAppsBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            SaveCustomApps();
+        }
+    }
+
+    private void SaveCustomApps()
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        var items = ParseProcessList(CustomAppsBox.Text);
+        _engine.UpdateConfig(c => c.CustomAppsToManage = items);
         _engine.ReapplyAgentFocusIfActive();
     }
 
@@ -401,16 +472,33 @@ public partial class MainPopupWindow : Window
             return;
         }
 
-        var items = CustomWhitelistBox.Text
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(ProcessFocusPolicy.NormalizeProcessName)
-            .Where(x => !string.IsNullOrEmpty(x))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var items = ParseProcessList(CustomWhitelistBox.Text);
 
         _engine.UpdateConfig(c => c.CustomAgentWhitelist = items);
         _engine.ReapplyAgentFocusIfActive();
     }
+
+    private void StarGitHub_Click(object sender, RoutedEventArgs e) => OpenUrl(GitHubRepoUrl);
+    private void SupportCoffee_Click(object sender, RoutedEventArgs e) => OpenUrl(SupportCoffeeUrl);
+
+    private static void OpenUrl(string url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch
+        {
+            // Ignore shell launch failure if no default browser is registered.
+        }
+    }
+
+    private static List<string> ParseProcessList(string text) =>
+        text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(ProcessFocusPolicy.NormalizeProcessName)
+            .Where(x => !string.IsNullOrEmpty(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     private void AutoSleepSwitch_Click(object sender, RoutedEventArgs e) =>
         _engine.UpdateConfig(c => c.AutoSleepOnCompletion = AutoSleepSwitch.IsChecked == true);
@@ -426,6 +514,94 @@ public partial class MainPopupWindow : Window
         var enabled = StartupSwitch.IsChecked == true;
         _engine.UpdateConfig(c => c.LaunchAtStartup = enabled);
         StartupManager.SetLaunchAtStartup(enabled);
+    }
+
+    private async void AutoUpdateSwitch_Click(object sender, RoutedEventArgs e)
+    {
+        var enabled = AutoUpdateSwitch.IsChecked == true;
+        _engine.UpdateConfig(c => c.AutoCheckForUpdates = enabled);
+        if (enabled && _updateService.State.Phase == UpdatePhase.Idle)
+        {
+            await _updateService.CheckForUpdatesAsync(isBackgroundCheck: true);
+        }
+    }
+
+    private async void CheckOrInstallUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_updateService.State.Phase == UpdatePhase.Available
+            || (_updateService.State.Phase == UpdatePhase.Error && _updateService.State.Release is not null))
+        {
+            await StartUpdateInstallAsync();
+            return;
+        }
+
+        await _updateService.CheckForUpdatesAsync(isBackgroundCheck: false);
+    }
+
+    private async void InstallUpdate_Click(object sender, RoutedEventArgs e) =>
+        await StartUpdateInstallAsync();
+
+    private async Task StartUpdateInstallAsync() =>
+        await _updateService.DownloadAndInstallAsync(_prepareForInstallerExit, _finalizeExit);
+
+    private void OnUpdateStateChanged(UpdateUiState state) =>
+        Dispatcher.BeginInvoke(() => ApplyUpdateState(state));
+
+    private void ApplyUpdateState(UpdateUiState state)
+    {
+        var ver = state.CurrentVersion;
+        VersionText.Text = $"Nocturnal v{ver.Major}.{ver.Minor}.{Math.Max(0, ver.Build)}";
+
+        var canRetryDownload = state.Phase == UpdatePhase.Error && state.Release is not null;
+        var showBanner = state.Phase is UpdatePhase.Available or UpdatePhase.Downloading or UpdatePhase.Installing
+            || canRetryDownload;
+        UpdateBannerBorder.Visibility = showBanner ? Visibility.Visible : Visibility.Collapsed;
+
+        var isBusy = state.Phase is UpdatePhase.Checking or UpdatePhase.Downloading or UpdatePhase.Installing;
+        UpdateBannerBtn.IsEnabled = state.Phase == UpdatePhase.Available || canRetryDownload;
+        CheckUpdateBtn.IsEnabled = !isBusy;
+
+        if (state.Release is { } release)
+        {
+            UpdateBannerTitle.Text = $"Update {release.TagName} available";
+            UpdateBannerSub.Text = state.Phase switch
+            {
+                UpdatePhase.Downloading => state.Message ?? "Downloading...",
+                UpdatePhase.Installing => state.Message ?? "Launching installer...",
+                UpdatePhase.Error => $"{state.Message ?? "Download failed"} — click Retry",
+                _ => string.IsNullOrWhiteSpace(release.InstallerDownloadUrl)
+                    ? "Open release page to download"
+                    : "Ready for one-click install"
+            };
+            UpdateBannerBtn.Content = state.Phase switch
+            {
+                UpdatePhase.Downloading => $"{(int)Math.Round(state.DownloadProgress * 100)}%",
+                UpdatePhase.Installing => "Installing",
+                UpdatePhase.Error => "Retry",
+                _ => "Update"
+            };
+        }
+
+        UpdateStatusText.Text = state.Phase switch
+        {
+            UpdatePhase.Checking => "Checking for updates...",
+            UpdatePhase.UpToDate => "Up to date",
+            UpdatePhase.Available => $"Update {state.Release?.TagName} ready",
+            UpdatePhase.Downloading => state.Message ?? "Downloading...",
+            UpdatePhase.Installing => state.Message ?? "Launching installer...",
+            UpdatePhase.Error => state.Message ?? "Update check failed",
+            _ => "Check GitHub Releases"
+        };
+
+        CheckUpdateBtn.Content = state.Phase switch
+        {
+            UpdatePhase.Available => "Update",
+            UpdatePhase.Error when state.Release is not null => "Retry",
+            UpdatePhase.Checking => "Checking",
+            UpdatePhase.Downloading => "Downloading",
+            UpdatePhase.Installing => "Installing",
+            _ => "Check"
+        };
     }
 
     private void BatteryThreshold_LostFocus(object sender, RoutedEventArgs e)

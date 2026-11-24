@@ -14,9 +14,11 @@ public partial class App : System.Windows.Application
 {
     private Mutex? _singleInstanceMutex;
     private SessionEngine? _engine;
+    private AppUpdateService? _updateService;
     private TrayIconService? _trayIcon;
     private MainPopupWindow? _popup;
     private DispatcherTimer? _timer;
+    private DispatcherTimer? _updateTimer;
     private int _tickCount;
     private bool _isExiting;
 
@@ -30,6 +32,9 @@ public partial class App : System.Windows.Application
             Shutdown();
             return;
         }
+
+        _updateService = new AppUpdateService();
+        _updateService.CleanupStaleUpdateFiles();
 
         _engine = new SessionEngine(
             new Win32PowerController(),
@@ -48,8 +53,18 @@ public partial class App : System.Windows.Application
         DispatcherUnhandledException += (_, _) => SafeRestoreOnCrash();
         AppDomain.CurrentDomain.UnhandledException += (_, _) => SafeRestoreOnCrash();
 
-        _popup = new MainPopupWindow(_engine, ExitApplication);
+        _popup = new MainPopupWindow(
+            _engine,
+            _updateService,
+            ExitApplication,
+            PrepareForInstallerExit,
+            () => Dispatcher.BeginInvoke(() => Shutdown()));
         _trayIcon = new TrayIconService(_engine, () => _popup.ToggleNearTray(), ExitApplication);
+
+        _updateService.NewUpdateDetected += release =>
+        {
+            Dispatcher.BeginInvoke(() => _trayIcon?.ShowUpdateAvailable(release));
+        };
 
         _engine.StatusChanged += status =>
         {
@@ -88,6 +103,21 @@ public partial class App : System.Windows.Application
         };
         _timer.Start();
 
+        _updateTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
+        _updateTimer.Tick += async (_, _) =>
+        {
+            if (_updateTimer is not null)
+            {
+                _updateTimer.Interval = TimeSpan.FromHours(12);
+            }
+
+            if (_engine?.Config.AutoCheckForUpdates == true && _updateService is not null)
+            {
+                await _updateService.CheckForUpdatesAsync(isBackgroundCheck: true);
+            }
+        };
+        _updateTimer.Start();
+
         _trayIcon.Update(_engine.GetStatus());
     }
 
@@ -105,8 +135,14 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private void ExitApplication()
+    private void PrepareForInstallerExit()
     {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(PrepareForInstallerExit);
+            return;
+        }
+
         if (_isExiting)
         {
             return;
@@ -115,11 +151,24 @@ public partial class App : System.Windows.Application
 
         SystemEvents.SessionEnding -= OnSessionEnding;
         _timer?.Stop();
+        _updateTimer?.Stop();
         _engine?.Stop(StopReason.AppExiting);
         _trayIcon?.Dispose();
         _popup?.ForceClose();
-        _singleInstanceMutex?.ReleaseMutex();
+        try
+        {
+            _singleInstanceMutex?.ReleaseMutex();
+        }
+        catch
+        {
+            // ReleaseMutex may throw if invoked outside the owning thread; Dispose still closes the handle cleanly.
+        }
         _singleInstanceMutex?.Dispose();
+    }
+
+    private void ExitApplication()
+    {
+        PrepareForInstallerExit();
         Shutdown();
     }
 }

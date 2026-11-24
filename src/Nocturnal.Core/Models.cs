@@ -32,16 +32,36 @@ public enum ProcessAction
 {
     Protect,
     ThrottleEcoQos,
+    DeepPause,
     GracefulClose
 }
+
+public enum SelectedAppMode
+{
+    Off,
+    DeepPause,
+    GracefulClose
+}
+
+public sealed record SuspendedProcessRecord(
+    int Pid,
+    DateTimeOffset StartTimeUtc);
+
+public sealed record ProcessNode(
+    int Pid,
+    int ParentPid,
+    string Name,
+    int SessionId,
+    string? ImagePath);
 
 public sealed record FocusReport(
     bool IsEngaged,
     int ThrottledProcessCount,
+    int PausedProcessCount,
     int ClosedAppCount,
-    IReadOnlyList<string> ClosedAppNames)
+    IReadOnlyList<string> AffectedAppNames)
 {
-    public static FocusReport Empty { get; } = new(false, 0, 0, []);
+    public static FocusReport Empty { get; } = new(false, 0, 0, 0, []);
 }
 
 public sealed record SystemPowerSnapshot(
@@ -63,7 +83,8 @@ public sealed record JournalEntry(
     bool ClamshellEnabled,
     LidActionBackup? LidBackup,
     bool LowPowerEngagedByApp,
-    bool AutoSleepOnEnd);
+    bool AutoSleepOnEnd,
+    IReadOnlyList<SuspendedProcessRecord>? SuspendedProcesses = null);
 
 public sealed class AppConfig
 {
@@ -80,10 +101,24 @@ public sealed class AppConfig
     public bool LaunchAtStartup { get; set; } = false;
     public bool AgentFocusEnabled { get; set; } = false;
     public bool FocusEcoQosEnabled { get; set; } = true;
+    public bool FocusRamTrimEnabled { get; set; } = true;
+    public SelectedAppMode FocusSelectedAppMode { get; set; } = SelectedAppMode.Off;
     public bool FocusCloseSelectedApps { get; set; } = false;
     public List<string> FocusAppsToClose { get; set; } = ["Discord", "Spotify", "Steam"];
+    public List<string> CustomAppsToManage { get; set; } = [];
     public List<string> CustomAgentWhitelist { get; set; } = [];
+    public bool AutoCheckForUpdates { get; set; } = true;
 }
+
+public sealed record UpdateReleaseInfo(
+    Version Version,
+    string TagName,
+    string ReleaseUrl,
+    string? InstallerDownloadUrl,
+    string? InstallerFileName,
+    long? InstallerSizeBytes,
+    string? ExpectedSha256Hex,
+    string? ReleaseNotes);
 
 public sealed record SessionStatus(
     bool IsActive,

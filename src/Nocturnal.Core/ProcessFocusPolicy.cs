@@ -2,20 +2,19 @@ namespace Nocturnal.Core;
 
 public static class ProcessFocusPolicy
 {
-    public static readonly string[] CommonRamHogApps =
-    [
-        "Discord",
-        "Spotify",
-        "Steam",
-        "ms-teams",
-        "Teams",
-        "WhatsApp",
-        "Telegram",
-        "Slack",
-        "EpicGamesLauncher"
-    ];
+    private static readonly HashSet<string> ShellLaunchers = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "explorer",
+        "svchost",
+        "sihost",
+        "services",
+        "wininit",
+        "userinit",
+        "taskhostw",
+        "RuntimeBroker"
+    };
 
-    private static readonly HashSet<string> ProtectedSystemAndAgentNames = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> ProtectedRootNames = new(StringComparer.OrdinalIgnoreCase)
     {
         // Windows core & shell
         "System",
@@ -23,30 +22,23 @@ public static class ProcessFocusPolicy
         "Registry",
         "smss",
         "csrss",
-        "wininit",
-        "services",
         "lsass",
-        "svchost",
         "fontdrvhost",
         "dwm",
         "winlogon",
-        "explorer",
         "ShellExperienceHost",
         "StartMenuExperienceHost",
         "SearchHost",
         "TextInputHost",
         "Taskmgr",
-        "sihost",
         "ctfmon",
-        "RuntimeBroker",
         "SecurityHealthService",
         "MsMpEng",
         "audiodg",
-        "conhost",
-        "OpenConsole",
         "Nocturnal",
 
-        // Agent-agnostic AI & developer runtimes / IDEs / terminals / containers
+        // AI agents & local LLM hosts
+        "agy",
         "antigravity",
         "claude",
         "codex",
@@ -56,7 +48,42 @@ public static class ProcessFocusPolicy
         "opencode",
         "cline",
         "ollama",
+        "ollama app",
         "lmstudio",
+        "llama-server",
+        "koboldcpp",
+
+        // Terminals
+        "WindowsTerminal",
+        "wt",
+        "pwsh",
+        "powershell",
+        "cmd",
+        "alacritty",
+        "wezterm-gui",
+        "mintty",
+        "bash",
+        "Hyper",
+        "Tabby",
+        "ConEmu64",
+        "conhost",
+        "OpenConsole",
+
+        // IDEs & editors
+        "Code",
+        "Cursor",
+        "Windsurf",
+        "zed",
+        "devenv",
+        "rider64",
+        "idea64",
+        "pycharm64",
+        "webstorm64",
+        "goland64",
+        "clion64",
+        "sublime_text",
+
+        // Dev runtimes & containers
         "node",
         "bun",
         "deno",
@@ -78,28 +105,31 @@ public static class ProcessFocusPolicy
         "git",
         "ssh",
         "ssh-agent",
-        "pwsh",
-        "powershell",
-        "cmd",
-        "WindowsTerminal",
-        "wt",
-        "alacritty",
-        "wezterm-gui",
-        "Code",
-        "Cursor",
-        "Windsurf",
-        "zed",
-        "devenv",
-        "rider64",
-        "idea64",
-        "pycharm64",
         "docker",
         "com.docker.backend",
         "Docker Desktop",
         "wsl",
         "wslhost",
         "vmmem",
-        "VmmemWSL"
+        "VmmemWSL",
+
+        // Remote access, VPNs, & local DNS
+        "remoting_desktop",
+        "remoting_host",
+        "remoting_network",
+        "tailscaled",
+        "tailscale-ipn",
+        "cloudflared",
+        "sshd",
+        "rustdesk",
+        "AnyDesk",
+        "parsecd",
+        "TeamViewer",
+        "TeamViewer_Service",
+        "mstsc",
+        "wireguard",
+        "openvpn",
+        "AdGuardHome"
     };
 
     public static string NormalizeProcessName(string name)
@@ -112,57 +142,151 @@ public static class ProcessFocusPolicy
         return trimmed;
     }
 
-    public static ProcessAction Evaluate(
-        string processName,
-        int sessionId,
+    public static bool IsProtectedSystemPath(string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath))
+        {
+            return false;
+        }
+
+        var path = imagePath.Trim().Replace('/', '\\');
+        if (path.Contains(@"\DriverStore\", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (path.Length >= 2 && path[1] == ':')
+        {
+            path = path[2..];
+        }
+
+        return path.StartsWith(@"\Windows\System32\", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(@"\Windows\SysWOW64\", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(@"\Windows\SystemApps\", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(@"\Windows\ImmersiveControlPanel\", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static Dictionary<int, ProcessAction> EvaluateTree(
+        IReadOnlyList<ProcessNode> snapshot,
         int currentSessionId,
-        bool hasMainWindow,
+        int currentPid,
         AppConfig config)
     {
-        if (sessionId != currentSessionId)
+        var byPid = new Dictionary<int, ProcessNode>(snapshot.Count);
+        foreach (var node in snapshot)
+        {
+            byPid[node.Pid] = node;
+        }
+
+        var customWhitelist = BuildNormalizedSet(config.CustomAgentWhitelist);
+        var targets = BuildNormalizedSet(config.FocusAppsToClose);
+        foreach (var extra in config.CustomAppsToManage)
+        {
+            var normExtra = NormalizeProcessName(extra);
+            if (!string.IsNullOrEmpty(normExtra))
+            {
+                targets.Add(normExtra);
+            }
+        }
+
+        var mode = config.FocusSelectedAppMode != SelectedAppMode.Off
+            ? config.FocusSelectedAppMode
+            : (config.FocusCloseSelectedApps ? SelectedAppMode.GracefulClose : SelectedAppMode.Off);
+
+        var result = new Dictionary<int, ProcessAction>(snapshot.Count);
+        foreach (var node in snapshot)
+        {
+            result[node.Pid] = EvaluateNode(node, byPid, currentSessionId, currentPid, customWhitelist, targets, mode, config);
+        }
+
+        return result;
+    }
+
+    private static ProcessAction EvaluateNode(
+        ProcessNode node,
+        Dictionary<int, ProcessNode> byPid,
+        int currentSessionId,
+        int currentPid,
+        HashSet<string> customWhitelist,
+        HashSet<string> targets,
+        SelectedAppMode mode,
+        AppConfig config)
+    {
+        if (node.Pid == currentPid || node.SessionId != currentSessionId)
         {
             return ProcessAction.Protect;
         }
 
-        var normalized = NormalizeProcessName(processName);
-        if (string.IsNullOrEmpty(normalized))
+        var norm = NormalizeProcessName(node.Name);
+        if (string.IsNullOrEmpty(norm)
+            || IsProtectedSystemPath(node.ImagePath)
+            || ShellLaunchers.Contains(norm)
+            || ProtectedRootNames.Contains(norm)
+            || customWhitelist.Contains(norm))
         {
             return ProcessAction.Protect;
         }
 
-        if (ProtectedSystemAndAgentNames.Contains(normalized))
+        var hasTargetAncestor = false;
+        var visited = new HashSet<int> { node.Pid };
+        var curPid = node.ParentPid;
+        for (var depth = 0; depth < 24 && curPid != 0 && visited.Add(curPid); depth++)
         {
-            return ProcessAction.Protect;
-        }
+            if (!byPid.TryGetValue(curPid, out var parent))
+            {
+                break;
+            }
 
-        foreach (var custom in config.CustomAgentWhitelist)
-        {
-            var customNorm = NormalizeProcessName(custom);
-            if (!string.IsNullOrEmpty(customNorm)
-                && string.Equals(normalized, customNorm, StringComparison.OrdinalIgnoreCase))
+            var parentNorm = NormalizeProcessName(parent.Name);
+            if (ShellLaunchers.Contains(parentNorm))
+            {
+                break;
+            }
+
+            if (ProtectedRootNames.Contains(parentNorm) || customWhitelist.Contains(parentNorm))
             {
                 return ProcessAction.Protect;
             }
+
+            if (targets.Contains(parentNorm))
+            {
+                hasTargetAncestor = true;
+            }
+
+            curPid = parent.ParentPid;
         }
 
-        if (config.FocusCloseSelectedApps)
+        if (mode != SelectedAppMode.Off)
         {
-            foreach (var app in config.FocusAppsToClose)
+            if (targets.Contains(norm))
             {
-                var appNorm = NormalizeProcessName(app);
-                if (!string.IsNullOrEmpty(appNorm)
-                    && string.Equals(normalized, appNorm, StringComparison.OrdinalIgnoreCase))
-                {
-                    return ProcessAction.GracefulClose;
-                }
+                return mode == SelectedAppMode.DeepPause
+                    ? ProcessAction.DeepPause
+                    : ProcessAction.GracefulClose;
+            }
+
+            if (hasTargetAncestor && mode == SelectedAppMode.DeepPause)
+            {
+                return ProcessAction.DeepPause;
             }
         }
 
-        if (config.FocusEcoQosEnabled && hasMainWindow)
-        {
-            return ProcessAction.ThrottleEcoQos;
-        }
+        return config.FocusEcoQosEnabled
+            ? ProcessAction.ThrottleEcoQos
+            : ProcessAction.Protect;
+    }
 
-        return ProcessAction.Protect;
+    private static HashSet<string> BuildNormalizedSet(IEnumerable<string> items)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in items)
+        {
+            var norm = NormalizeProcessName(item);
+            if (!string.IsNullOrEmpty(norm))
+            {
+                set.Add(norm);
+            }
+        }
+        return set;
     }
 }

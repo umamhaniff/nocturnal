@@ -37,13 +37,17 @@ public interface IClock
 public interface IAgentFocusController
 {
     FocusReport Engage(AppConfig config);
+    IReadOnlyList<SuspendedProcessRecord> GetSuspendedProcesses();
     void Restore();
+    void RecoverSuspended(IReadOnlyList<SuspendedProcessRecord> records);
 }
 
 public sealed class NoOpAgentFocusController : IAgentFocusController
 {
     public FocusReport Engage(AppConfig config) => FocusReport.Empty;
+    public IReadOnlyList<SuspendedProcessRecord> GetSuspendedProcesses() => [];
     public void Restore() { }
+    public void RecoverSuspended(IReadOnlyList<SuspendedProcessRecord> records) { }
 }
 
 public sealed class SystemClock : IClock

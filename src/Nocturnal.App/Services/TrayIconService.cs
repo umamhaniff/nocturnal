@@ -17,6 +17,7 @@ public sealed class TrayIconService : IDisposable
     private readonly ToolStripMenuItem _clamshellItem;
     private readonly ToolStripMenuItem _focusItem;
     private readonly ToolStripMenuItem _stopItem;
+    private readonly ToolStripMenuItem _updateItem;
     private readonly Dictionary<TrayUiStyle, ToolStripMenuItem> _styleItems = [];
 
     private bool? _lastRenderedActive;
@@ -49,6 +50,9 @@ public sealed class TrayIconService : IDisposable
         _stopItem = new ToolStripMenuItem("Stop Session");
         _stopItem.Click += (_, _) => _engine.Stop(StopReason.Manual);
 
+        _updateItem = new ToolStripMenuItem("Update Available") { Visible = false };
+        _updateItem.Click += (_, _) => _togglePopup();
+
         var menu = new ContextMenuStrip();
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
@@ -63,6 +67,7 @@ public sealed class TrayIconService : IDisposable
         menu.Items.Add(CreateStyleMenu());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_stopItem);
+        menu.Items.Add(_updateItem);
         menu.Items.Add("Open Nocturnal", null, (_, _) => _togglePopup());
         menu.Items.Add("Exit", null, (_, _) => _exitApp());
 
@@ -281,6 +286,17 @@ public sealed class TrayIconService : IDisposable
         {
             DestroyIcon(hIcon);
         }
+    }
+
+    public void ShowUpdateAvailable(UpdateReleaseInfo release)
+    {
+        _updateItem.Text = $"Update Available ({release.TagName})";
+        _updateItem.Visible = true;
+        _notifyIcon.ShowBalloonTip(
+            5000,
+            "Nocturnal Update Available",
+            $"{release.TagName} is ready. Open Nocturnal and click Update.",
+            ToolTipIcon.Info);
     }
 
     public void Dispose()
