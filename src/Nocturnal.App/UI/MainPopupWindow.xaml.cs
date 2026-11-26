@@ -1,10 +1,12 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Nocturnal.App.Services;
 using Nocturnal.Core;
 
@@ -19,7 +21,7 @@ public partial class MainPopupWindow : Window
     private static readonly SolidColorBrush InactiveCrescentBrush = CreateFrozenBrush(0x64, 0x74, 0x8B);
     private static readonly SolidColorBrush InactivePulseBrush = CreateFrozenBrush(0x94, 0xA3, 0xB8);
     private static readonly SolidColorBrush ActiveHeaderTextBrush = CreateFrozenBrush(0x6E, 0xE7, 0xB7);
-    private static readonly SolidColorBrush IdleHeaderTextBrush = CreateFrozenBrush(0x64, 0x74, 0x8B);
+    private static readonly SolidColorBrush IdleHeaderTextBrush = CreateFrozenBrush(0x8A, 0x99, 0xB0);
 
     private readonly SessionEngine _engine;
     private readonly AppUpdateService _updateService;
@@ -27,9 +29,23 @@ public partial class MainPopupWindow : Window
     private readonly Action _exitApp;
     private readonly Action _prepareForInstallerExit;
     private readonly Action _finalizeExit;
+    private readonly DispatcherTimer _idleTrimTimer;
     private bool _isInitializing = true;
     private bool _allowClose;
     private bool _suppressDeactivateHide;
+    private bool _isWebhookSync;
+    private bool _webhookRevealed;
+    private bool? _nightShiftExpanded;
+    private bool? _wifiFailoverExpanded;
+    private bool? _alertsExpanded;
+    private string? _pendingUnrunningWatch;
+    private (bool IsActive, StopReason Reason, int HistoryCount)? _lastHistoryRenderKey;
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool K32EmptyWorkingSet(IntPtr hProcess);
 
     private static SolidColorBrush CreateFrozenBrush(byte r, byte g, byte b)
     {
@@ -54,6 +70,29 @@ public partial class MainPopupWindow : Window
         _finalizeExit = finalizeExit;
 
         InitializeComponent();
+        _idleTrimTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        _idleTrimTimer.Tick += (_, _) =>
+        {
+            _idleTrimTimer.Stop();
+            if (!IsVisible && !_allowClose)
+            {
+                GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, blocking: false);
+                K32EmptyWorkingSet(GetCurrentProcess());
+            }
+        };
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible)
+            {
+                _idleTrimTimer.Stop();
+            }
+            else if (!_allowClose)
+            {
+                _idleTrimTimer.Stop();
+                _idleTrimTimer.Start();
+            }
+        };
+
         _updateService.StateChanged += OnUpdateStateChanged;
         PreviewKeyDown += (_, e) =>
         {
@@ -78,6 +117,7 @@ public partial class MainPopupWindow : Window
     public void ForceClose()
     {
         _allowClose = true;
+        _idleTrimTimer.Stop();
         Close();
     }
 
@@ -106,6 +146,7 @@ public partial class MainPopupWindow : Window
 
     public void ShowNearTray()
     {
+        _lastHistoryRenderKey = null;
         SyncFromConfig();
         UpdateStatus(_engine.GetStatus(), _engine.LatestSnapshot);
 
@@ -115,6 +156,34 @@ public partial class MainPopupWindow : Window
         }
         RepositionNearTray();
         Activate();
+    }
+
+    public void SyncFromConfigIfVisible()
+    {
+        if (!IsVisible)
+        {
+            return;
+        }
+
+        _isInitializing = true;
+        var cfg = _engine.Config;
+        ClamshellSwitch.IsChecked = cfg.ClamshellEnabled;
+        AgentFocusSwitch.IsChecked = cfg.AgentFocusEnabled;
+        EcoQosSwitch.IsChecked = cfg.FocusEcoQosEnabled;
+
+        var effectiveMode = cfg.FocusSelectedAppMode != SelectedAppMode.Off
+            ? cfg.FocusSelectedAppMode
+            : (cfg.FocusCloseSelectedApps ? SelectedAppMode.GracefulClose : SelectedAppMode.Off);
+        ModeOffRadio.IsChecked = effectiveMode == SelectedAppMode.Off;
+        ModePauseRadio.IsChecked = effectiveMode == SelectedAppMode.DeepPause;
+        ModeCloseRadio.IsChecked = effectiveMode == SelectedAppMode.GracefulClose;
+
+        AutoSleepSwitch.IsChecked = cfg.AutoSleepOnCompletion;
+        KeepDisplaySwitch.IsChecked = cfg.KeepDisplayAwake;
+        ThermalGuardSwitch.IsChecked = cfg.EnableThermalProtection;
+        StartupSwitch.IsChecked = StartupManager.IsLaunchAtStartupEnabled();
+        AutoUpdateSwitch.IsChecked = cfg.AutoCheckForUpdates;
+        _isInitializing = false;
     }
 
     private void RepositionNearTray()
@@ -143,6 +212,7 @@ public partial class MainPopupWindow : Window
                 : status.ActiveProfileName is { } profName
                     ? $"{profName} • Ends {status.ExpiresAtUtc?.ToLocalTime():HH:mm}"
                     : $"Ends {status.ExpiresAtUtc?.ToLocalTime():HH:mm}";
+            StatusSubText.ToolTip = StatusSubText.Text;
             UpdateRingArc(1.0 - status.Progress);
             StopButton.Visibility = Visibility.Visible;
         }
@@ -166,13 +236,20 @@ public partial class MainPopupWindow : Window
                 StopReason.CrashRecovery => "Recovered power state",
                 _ => "Pick duration"
             };
+            StatusSubText.ToolTip = null;
             UpdateRingArc(0);
             StopButton.Visibility = Visibility.Collapsed;
         }
 
         FocusSummaryText.Text = BuildFocusSummary(status);
         UpdateFocusTelemetryBanner(status);
-        UpdateHistorySummary();
+
+        var historyKey = (status.IsActive, status.LastStopReason, _engine.GetRecentHistory().Count);
+        if (_lastHistoryRenderKey != historyKey)
+        {
+            _lastHistoryRenderKey = historyKey;
+            UpdateHistorySummary();
+        }
 
         if (snapshot is not null)
         {
@@ -343,10 +420,15 @@ public partial class MainPopupWindow : Window
         BackupSsidBox.Text = cfg.BackupWifiSsid;
 
         AlertsSwitch.IsChecked = cfg.AlertsEnabled;
+        _isWebhookSync = true;
         WebhookUrlBox.Text = cfg.AlertWebhookUrl;
+        WebhookPasswordBox.Password = cfg.AlertWebhookUrl;
+        _isWebhookSync = false;
+        UpdateWebhookPlaceholder();
         AlertOnCompletionCheck.IsChecked = cfg.AlertOnCompletion;
         AlertOnGuardCheck.IsChecked = cfg.AlertOnSafetyGuard;
 
+        ApplySettingsCardExpansions(cfg);
         SyncAppChips(cfg);
         SyncStyleRadios(cfg.UiStyle);
         ApplyUiStyleLayout(cfg.UiStyle);
@@ -555,12 +637,23 @@ public partial class MainPopupWindow : Window
         var norm = ProcessFocusPolicy.NormalizeProcessName(raw);
         if (string.IsNullOrEmpty(norm))
         {
+            _pendingUnrunningWatch = null;
             StatusSubText.Text = "Enter a process name";
+            return;
+        }
+
+        if (!_engine.IsProcessCurrentlyRunning(norm)
+            && !string.Equals(_pendingUnrunningWatch, norm, StringComparison.OrdinalIgnoreCase))
+        {
+            _pendingUnrunningWatch = norm;
+            StatusSubText.Text = $"'{norm}' not running — Watch again to confirm";
+            StatusSubText.ToolTip = StatusSubText.Text;
             return;
         }
 
         try
         {
+            _pendingUnrunningWatch = null;
             _engine.StartWatchingProcess(norm);
         }
         catch (ArgumentException)
@@ -730,8 +823,49 @@ public partial class MainPopupWindow : Window
         StartupManager.SetLaunchAtStartup(enabled);
     }
 
-    private void NightShiftSwitch_Click(object sender, RoutedEventArgs e) =>
-        _engine.UpdateConfig(c => c.NightShiftEnabled = NightShiftSwitch.IsChecked == true);
+    private void NightShiftHeader_Click(object sender, MouseButtonEventArgs e)
+    {
+        _nightShiftExpanded = NightShiftBody.Visibility != Visibility.Visible;
+        ApplySettingsCardExpansions(_engine.Config);
+    }
+
+    private void WifiFailoverHeader_Click(object sender, MouseButtonEventArgs e)
+    {
+        _wifiFailoverExpanded = WifiFailoverBody.Visibility != Visibility.Visible;
+        ApplySettingsCardExpansions(_engine.Config);
+    }
+
+    private void AlertsHeader_Click(object sender, MouseButtonEventArgs e)
+    {
+        _alertsExpanded = AlertsBody.Visibility != Visibility.Visible;
+        ApplySettingsCardExpansions(_engine.Config);
+    }
+
+    private void ApplySettingsCardExpansions(AppConfig cfg)
+    {
+        var nsOpen = _nightShiftExpanded ?? cfg.NightShiftEnabled;
+        NightShiftBody.Visibility = nsOpen ? Visibility.Visible : Visibility.Collapsed;
+        NightShiftChevron.Text = nsOpen ? "▾ " : "▸ ";
+
+        var wifiOpen = _wifiFailoverExpanded ?? cfg.WifiFailoverEnabled;
+        WifiFailoverBody.Visibility = wifiOpen ? Visibility.Visible : Visibility.Collapsed;
+        WifiFailoverChevron.Text = wifiOpen ? "▾ " : "▸ ";
+
+        var alertsOpen = _alertsExpanded ?? cfg.AlertsEnabled;
+        AlertsBody.Visibility = alertsOpen ? Visibility.Visible : Visibility.Collapsed;
+        AlertsChevron.Text = alertsOpen ? "▾ " : "▸ ";
+    }
+
+    private void NightShiftSwitch_Click(object sender, RoutedEventArgs e)
+    {
+        var enabled = NightShiftSwitch.IsChecked == true;
+        if (enabled)
+        {
+            _nightShiftExpanded = true;
+        }
+        _engine.UpdateConfig(c => c.NightShiftEnabled = enabled);
+        ApplySettingsCardExpansions(_engine.Config);
+    }
 
     private void NightShiftAcSwitch_Click(object sender, RoutedEventArgs e) =>
         _engine.UpdateConfig(c => c.NightShiftRequireAcPower = NightShiftAcSwitch.IsChecked == true);
@@ -772,7 +906,13 @@ public partial class MainPopupWindow : Window
     private void WifiFailoverSwitch_Click(object sender, RoutedEventArgs e)
     {
         SaveBackupSsid();
-        _engine.UpdateConfig(c => c.WifiFailoverEnabled = WifiFailoverSwitch.IsChecked == true);
+        var enabled = WifiFailoverSwitch.IsChecked == true;
+        if (enabled)
+        {
+            _wifiFailoverExpanded = true;
+        }
+        _engine.UpdateConfig(c => c.WifiFailoverEnabled = enabled);
+        ApplySettingsCardExpansions(_engine.Config);
     }
 
     private void SaveBackupSsid_Click(object sender, RoutedEventArgs e) => SaveBackupSsid();
@@ -798,7 +938,13 @@ public partial class MainPopupWindow : Window
     private void AlertsSwitch_Click(object sender, RoutedEventArgs e)
     {
         SaveWebhookUrl();
-        _engine.UpdateConfig(c => c.AlertsEnabled = AlertsSwitch.IsChecked == true);
+        var enabled = AlertsSwitch.IsChecked == true;
+        if (enabled)
+        {
+            _alertsExpanded = true;
+        }
+        _engine.UpdateConfig(c => c.AlertsEnabled = enabled);
+        ApplySettingsCardExpansions(_engine.Config);
     }
 
     private void AlertFilterCheck_Click(object sender, RoutedEventArgs e) =>
@@ -808,17 +954,75 @@ public partial class MainPopupWindow : Window
             c.AlertOnSafetyGuard = AlertOnGuardCheck.IsChecked == true;
         });
 
+    private void WebhookPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing || _isWebhookSync)
+        {
+            return;
+        }
+
+        _isWebhookSync = true;
+        WebhookUrlBox.Text = WebhookPasswordBox.Password;
+        _isWebhookSync = false;
+        UpdateWebhookPlaceholder();
+    }
+
+    private void ToggleWebhookReveal_Click(object sender, RoutedEventArgs e)
+    {
+        _isWebhookSync = true;
+        var current = CurrentWebhookInput();
+        _webhookRevealed = !_webhookRevealed;
+        if (_webhookRevealed)
+        {
+            WebhookUrlBox.Text = current;
+            WebhookPasswordBox.Visibility = Visibility.Collapsed;
+            WebhookUrlBox.Visibility = Visibility.Visible;
+            ToggleWebhookRevealBtn.Content = "Hide";
+            WebhookUrlBox.Focus();
+            WebhookUrlBox.CaretIndex = WebhookUrlBox.Text.Length;
+        }
+        else
+        {
+            WebhookPasswordBox.Password = current;
+            WebhookUrlBox.Visibility = Visibility.Collapsed;
+            WebhookPasswordBox.Visibility = Visibility.Visible;
+            ToggleWebhookRevealBtn.Content = "Show";
+            WebhookPasswordBox.Focus();
+        }
+        _isWebhookSync = false;
+        UpdateWebhookPlaceholder();
+    }
+
+    private string CurrentWebhookInput() =>
+        _webhookRevealed ? (WebhookUrlBox.Text ?? string.Empty) : (WebhookPasswordBox.Password ?? string.Empty);
+
+    private void UpdateWebhookPlaceholder()
+    {
+        WebhookPlaceholder.Visibility = !_webhookRevealed && string.IsNullOrEmpty(WebhookPasswordBox.Password)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
     private void SaveWebhookUrl_Click(object sender, RoutedEventArgs e) => SaveWebhookUrl();
     private void WebhookUrlBox_LostFocus(object sender, RoutedEventArgs e) => SaveWebhookUrl();
 
     private void SaveWebhookUrl()
     {
-        if (_isInitializing)
+        if (_isInitializing || _isWebhookSync)
         {
             return;
         }
 
-        var raw = (WebhookUrlBox.Text ?? string.Empty).Trim();
+        var raw = CurrentWebhookInput().Trim();
+        _isWebhookSync = true;
+        WebhookUrlBox.Text = raw;
+        if (WebhookPasswordBox.Password != raw)
+        {
+            WebhookPasswordBox.Password = raw;
+        }
+        _isWebhookSync = false;
+        UpdateWebhookPlaceholder();
+
         if (!string.IsNullOrEmpty(raw) && !WebhookPolicy.IsValidWebhookUrl(raw))
         {
             AlertStatusText.Text = "Must be an https:// non-local URL";

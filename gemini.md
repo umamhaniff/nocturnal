@@ -68,17 +68,19 @@ dotnet publish src/Nocturnal.App -c Release -r win-x64 --self-contained false -p
 
 ---
 
-## 5. Release Status & Technical Learnings (v1.1.1)
+## 5. Release Status & Technical Learnings (v1.3.1)
 
-* **Repository:** `https://github.com/umamhaniff/nocturnal` (branch `main`, commit `6e431ef`)
-* **Release Published:** `v1.1.1` (`Nocturnal-Setup-1.1.1.exe`, self-contained `win-x64`, `50,900,123` bytes / `48.54 MB`, SHA-256 `0E85C3816C54BC5565840D21842DA0D3C225F34F9FDFE1574F69B90A8B7DEEAB`, `20/20` passing unit tests, Windows Defender `0` threats)
-* **Previous Release:** `v1.0.0` (`2015c04`, `Nocturnal-Setup-1.0.0.exe`, `50,889,099` bytes, `11/11` tests)
+* **Repository:** `https://github.com/umamhaniff/nocturnal` (branch `main`)
+* **Current Release (`v1.3.1`):** `Nocturnal-Setup-1.3.1.exe` (`50,933,275` bytes / `48.57 MB`, self-contained `win-x64`, `45/45` passing unit tests, Windows Defender `0` threats)
+* **Previous Releases:** `v1.3.0` (`e545e15`), `v1.2.0` (`fb95a72`), `v1.1.1` (`6e431ef`), `v1.1.0` (`3294ebf`), `v1.0.0` (`2015c04`)
 * **Key Technical Learnings:**
-  * **WPF Thread Affinity on Async Self-Update:** Guard `PrepareForInstallerExit()` with `if (!Dispatcher.CheckAccess()) { Dispatcher.Invoke(PrepareForInstallerExit); return; }` because `AppUpdateService.DownloadAndInstallAsync` uses `.ConfigureAwait(false)` before tearing down WPF windows, timers, `NotifyIcon`, and the single-instance mutex.
+  * **Modern Standby S0ix & Journaled Energy Saver (`v1.3.1`):** `Win32PowerController` holds both `PowerCreateRequest` (`SystemRequired` + `ExecutionRequired`, padded 32-byte x64 `REASON_CONTEXT`) and `SetThreadExecutionState`; `OriginalEnergySaverThreshold` is persisted in `JournalEntry` + `HKCU\...\RunOnce` (`WindowsRecoveryHook`) recovers lid/paused state even when autostart is off.
+  * **Non-Destructive Profiles, Async Failover & Alert Flush (`v1.3.1`):** Quick Profiles (`AI Overnight`, `Build / Scraper`, `Presentation`) apply session overrides in memory without overwriting `config.json` and restore user baseline on stop; Wi-Fi failover checks real WAN reachability (`1.1.1.1:53`) + spawns `netsh` off the UI thread; webhook alerts flush up to `3.2s` before `SleepSystem()`.
+  * **UI/UX Hardening (`v1.3.1`):** Dark thin scrollbars, masked `WebhookPasswordBox` with Show/Hide, collapsible advanced Settings cards, safe `ListBoxItem` click handling + clamped positioning in `AppPickerWindow`, anti-typo guard on Watch Process, and 3s delayed idle `K32EmptyWorkingSet` trim.
+  * **Zero-Blocker Installer & CLI PATH (`v1.3.1`):** `ChangesEnvironment=yes` broadcasts `WM_SETTINGCHANGE` immediately; exact `;dir;` matching prevents prefix corruption in `RemoveFromUserPath`; `InitializeUninstall` closes running tray instances via `Nocturnal_GracefulExit_Event`.
+  * **WPF Thread Affinity on Async Self-Update:** Guard `PrepareForInstallerExit()` with `if (!Dispatcher.CheckAccess()) { Dispatcher.Invoke(PrepareForInstallerExit); return; }` because `AppUpdateService.DownloadAndInstallAsync` uses `.ConfigureAwait(false)` before tearing down WPF windows, timers, `NotifyIcon`, and the single-instance mutex; start the installer **before** tearing down the tray so UAC cancellation (`1223`) never leaves a zombie process.
   * **Single-Instance Tray UX:** Use `Nocturnal_ActivatePopup_Event` (`EventWaitHandle` + `ThreadPool.RegisterWaitForSingleObject`) so launching shortcuts while already running wakes/opens the Midnight Glass flyout instead of exiting silently; manual launch opens the flyout while Windows startup uses `--minimized`.
-  * **Zero-Blocker Tray Upgrades:** Removing `AppMutex` blocking in favor of `InitializeSetup()` signaling `Nocturnal_GracefulExit_Event` (`OpenEventW`/`SetEvent`) with `taskkill` fallback for older `v1.0.0`/`v1.1.0` builds lets upgrades replace running tray instances without modal errors; `/RELAUNCH=1` triggers post-install relaunch only during silent self-updates.
   * **Global Pre-Push Audit Governance:** Skill `pre-push-audit` (`C:\Users\HP\.agents\skills\pre-push-audit\SKILL.md`) and permanent rule `#10` in `C:\Users\HP\.gemini\config\AGENTS.md` enforce 6-gate release verification before every `git push` or public release.
-  * **Planned `v1.2` Candidates:** `nocturnal-cli` (Named Pipe IPC), Process-Watcher (*Awake Until Done*), One-Click Display Off (`SC_MONITORPOWER`), and Live Focus Telemetry + Session History.
   * **Inno Setup Silent Mode:** Gunakan `PrivilegesRequiredOverridesAllowed=commandline` (bukan `dialog`) agar `/VERYSILENT` tidak pernah hang menunggu dialog mode instalasi di background.
   * **WPF Tray Window Lifecycle:** Override `OnClosing` untuk `e.Cancel = true; Hide();` kecuali saat dipanggil lewat `ForceClose()`, supaya `Alt+F4` tidak menghancurkan flyout singleton; ikat tombol `Esc` untuk menyembunyikan flyout.
   * **Live Startup Sync:** Baca `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\Nocturnal` secara langsung (`StartupManager.IsLaunchAtStartupEnabled()`) daripada mengandalkan nilai default JSON setelah autostart dipasang oleh installer.

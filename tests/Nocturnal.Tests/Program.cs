@@ -48,6 +48,13 @@ internal static class Program
         Run("FocusPolicy_IsDefaultProtected_FlagsSystemAndAgentsOnly", TestFocusPolicyDefaultProtectedHelper);
         Run("AppConfig_BackwardCompatible_DeserializesOlderJsonCleanly", TestAppConfigBackwardCompatibility);
         Run("SchedulePolicy_FindProfile_SupportsExactAndAliases", TestScheduleProfileLookup);
+        Run("StopInternal_WaitsForAlertDelivery_OnlyWhenSleeping", TestStopInternalAlertFlushOnSleep);
+        Run("Profile_IsNonDestructive_AndRestoresUserBaselineOnStop", TestProfileNonDestructiveBaseline);
+        Run("CrashRecovery_RestoresJournaledEnergySaverThreshold", TestCrashRecoveryEnergySaverThreshold);
+        Run("NightShift_HandlesMidnightWrapWindow", TestNightShiftMidnightWrap);
+        Run("SessionEngine_CachesHistoryInMemory_WithoutRepeatedDiskReads", TestSessionHistoryInMemoryCache);
+        Run("SessionEngine_AppExitingWhenIdle_IsNoOp", TestAppExitingWhenIdleIsNoOp);
+        Run("SessionEngine_ArmsAndClearsRecoveryHook_OnClamshellLifecycle", TestRecoveryHookLifecycle);
 
         Console.WriteLine($"\nResults: {_passed} passed, {_failed} failed.");
         return _failed == 0 ? 0 : 1;
@@ -85,7 +92,8 @@ internal static class Program
     private static (SessionEngine engine, FakePowerController power, FakeSystemMonitor monitor, InMemoryJournalStore journal, FakeClock clock, FakeAgentFocusController focus, FakeProcessWatcher watcher, InMemorySessionHistoryStore history) CreateFullHarness(
         TimeSpan? watchGracePeriod = null,
         IAlertNotifier? alertNotifier = null,
-        INetworkFailoverController? networkFailover = null)
+        INetworkFailoverController? networkFailover = null,
+        IRecoveryHook? recoveryHook = null)
     {
         var callLog = new List<string>();
         var power = new FakePowerController(callLog);
@@ -96,7 +104,7 @@ internal static class Program
         var focus = new FakeAgentFocusController();
         var watcher = new FakeProcessWatcher();
         var history = new InMemorySessionHistoryStore();
-        var engine = new SessionEngine(power, monitor, journal, config, clock, focus, watcher, history, watchGracePeriod, alertNotifier, networkFailover);
+        var engine = new SessionEngine(power, monitor, journal, config, clock, focus, watcher, history, watchGracePeriod, alertNotifier, networkFailover, recoveryHook);
         return (engine, power, monitor, journal, clock, focus, watcher, history);
     }
 
@@ -802,6 +810,126 @@ internal static class Program
         Assert(pres is { Name: "Presentation", KeepDisplayAwake: true, ClamshellEnabled: false }, "Presentation should keep display awake without clamshell");
     }
 
+    private static void TestStopInternalAlertFlushOnSleep()
+    {
+        var alerts = new FakeAlertNotifier();
+        var (engine, _, _, _, clock, _, _, _) = CreateFullHarness(alertNotifier: alerts);
+        engine.UpdateConfig(c =>
+        {
+            c.AlertsEnabled = true;
+            c.AlertWebhookUrl = "https://discord.com/api/webhooks/12345/secret";
+            c.AutoSleepOnCompletion = true;
+        });
+
+        engine.Start(TimeSpan.FromMinutes(10));
+        clock.Advance(TimeSpan.FromMinutes(10));
+        engine.Tick();
+
+        Assert(alerts.WaitFlags.Count == 1 && alerts.WaitFlags[0], "Completion alert before AutoSleep must wait for delivery");
+
+        alerts.WaitFlags.Clear();
+        engine.UpdateConfig(c => c.AutoSleepOnCompletion = false);
+        engine.Start(TimeSpan.FromMinutes(10));
+        clock.Advance(TimeSpan.FromMinutes(10));
+        engine.Tick();
+
+        Assert(alerts.WaitFlags.Count == 1 && !alerts.WaitFlags[0], "Completion alert without AutoSleep should stay fire-and-forget");
+    }
+
+    private static void TestProfileNonDestructiveBaseline()
+    {
+        var (engine, _, _, _, _, _, _, _) = CreateFullHarness();
+        engine.UpdateConfig(c =>
+        {
+            c.ClamshellEnabled = true;
+            c.AgentFocusEnabled = false;
+            c.KeepDisplayAwake = false;
+            c.AutoSleepOnCompletion = true;
+        });
+
+        engine.ApplyProfile("Presentation", startImmediately: true);
+        Assert(!engine.Config.ClamshellEnabled && engine.Config.KeepDisplayAwake && !engine.Config.AutoSleepOnCompletion,
+            "Active profile must apply temporary session flags");
+
+        engine.Stop(StopReason.Manual);
+        Assert(engine.Config.ClamshellEnabled && !engine.Config.AgentFocusEnabled && !engine.Config.KeepDisplayAwake && engine.Config.AutoSleepOnCompletion,
+            "Stopping a temporary profile session must restore user baseline config");
+    }
+
+    private static void TestCrashRecoveryEnergySaverThreshold()
+    {
+        var (engine, power, monitor, journal, clock, _, _, _) = CreateFullHarness();
+        power.EnergySaverThreshold = 35;
+        engine.Start(TimeSpan.FromHours(1));
+
+        monitor.Snapshot = new SystemPowerSnapshot(false, 30, true, ThermalLevel.Normal, 45);
+        clock.Advance(TimeSpan.FromMinutes(1));
+        engine.Tick();
+
+        Assert(journal.Current?.OriginalEnergySaverThreshold == 35, "Journal must record original Energy Saver threshold");
+
+        // Simulate new process recovery using saved journal.
+        var (restarted, restartedPower, _, restartedJournal, _, _, _, _) = CreateFullHarness();
+        restartedJournal.Save(journal.Current!);
+        restarted.RecoverIfNeeded();
+
+        Assert(restartedPower.LastRestoredThreshold == 35, "Crash recovery must restore journaled Energy Saver threshold");
+    }
+
+    private static void TestNightShiftMidnightWrap()
+    {
+        var cfg = new AppConfig
+        {
+            NightShiftEnabled = true,
+            NightShiftStartTime = "23:58",
+            NightShiftDurationMinutes = 120,
+            NightShiftRequireAcPower = true
+        };
+        var dec1At0002 = new DateTimeOffset(2026, 12, 1, 0, 2, 0, TimeSpan.FromHours(7));
+        var triggerNov30 = new DateOnly(2026, 11, 30);
+
+        Assert(SchedulePolicy.ShouldTriggerNightShift(cfg, dec1At0002, isSessionActive: false, isOnAcPower: true, null, out var actualDate),
+            "Midnight-wrapping 5m Night Shift window must still trigger at 00:02");
+        Assert(actualDate == triggerNov30, "Wrapped trigger date must resolve to previous calendar day");
+        Assert(!SchedulePolicy.ShouldTriggerNightShift(cfg, dec1At0002, isSessionActive: false, isOnAcPower: true, triggerNov30, out _),
+            "Must not re-trigger after midnight for same wrapped night");
+    }
+
+    private static void TestSessionHistoryInMemoryCache()
+    {
+        var (engine, _, _, _, _, _, _, history) = CreateFullHarness();
+        _ = engine.GetRecentHistory();
+        _ = engine.GetRecentHistory();
+        engine.Start(TimeSpan.FromMinutes(10));
+        engine.Stop(StopReason.Manual);
+        var loaded = engine.GetRecentHistory();
+
+        Assert(history.LoadCount == 1, $"History should only read from store once, actual={history.LoadCount}");
+        Assert(loaded.Count == 1, "Cached history should immediately reflect stopped session");
+    }
+
+    private static void TestAppExitingWhenIdleIsNoOp()
+    {
+        var (engine, _, _, _, _, _, _, _) = CreateFullHarness();
+        var notifications = 0;
+        engine.StatusChanged += _ => notifications++;
+
+        engine.Stop(StopReason.AppExiting);
+        Assert(notifications == 0, "Idle Stop(AppExiting) must be an idempotent no-op");
+    }
+
+    private static void TestRecoveryHookLifecycle()
+    {
+        var hook = new FakeRecoveryHook();
+        var (engine, _, _, _, _, _, _, _) = CreateFullHarness(recoveryHook: hook);
+
+        engine.Start(TimeSpan.FromMinutes(15), clamshellOverride: true);
+        Assert(hook.IsArmed, "Clamshell session start must arm one-shot recovery hook");
+
+        engine.Stop(StopReason.Manual);
+        Assert(!hook.IsArmed, "Normal session stop must disarm recovery hook");
+    }
+
     private sealed class FakePowerController(List<string> callLog) : IPowerController
     {
         public List<string> CallLog { get; } = callLog;
@@ -810,6 +938,8 @@ internal static class Program
         public bool ClamshellActive { get; private set; }
         public LidActionBackup? RestoredBackup { get; private set; }
         public bool? PowerSaverState { get; private set; }
+        public int? EnergySaverThreshold { get; set; } = 35;
+        public int? LastRestoredThreshold { get; private set; }
         public int DisplayOffCount { get; private set; }
         public bool Slept { get; private set; }
 
@@ -840,9 +970,15 @@ internal static class Program
             RestoredBackup = backup;
         }
 
-        public bool TrySetPowerSaver(bool enabled)
+        public int? ReadEnergySaverThreshold() => EnergySaverThreshold;
+
+        public bool TrySetPowerSaver(bool enabled, int? restoreThreshold = null)
         {
             PowerSaverState = enabled;
+            if (!enabled)
+            {
+                LastRestoredThreshold = restoreThreshold;
+            }
             return true;
         }
 
@@ -915,7 +1051,19 @@ internal static class Program
     private sealed class FakeAlertNotifier : IAlertNotifier
     {
         public List<WebhookAlertEvent> Events { get; } = [];
-        public void Notify(AppConfig config, WebhookAlertEvent alert) => Events.Add(alert);
+        public List<bool> WaitFlags { get; } = [];
+
+        public void Notify(AppConfig config, WebhookAlertEvent alert, bool waitForDelivery = false)
+        {
+            Events.Add(alert);
+            WaitFlags.Add(waitForDelivery);
+        }
+    }
+
+    private sealed class FakeRecoveryHook : IRecoveryHook
+    {
+        public bool IsArmed { get; private set; }
+        public void SetRecoveryArmed(bool armed) => IsArmed = armed;
     }
 
     private sealed class FakeNetworkFailoverController : INetworkFailoverController
@@ -934,8 +1082,13 @@ internal static class Program
     private sealed class InMemorySessionHistoryStore : ISessionHistoryStore
     {
         private readonly List<SessionHistoryRecord> _records = [];
+        public int LoadCount { get; private set; }
 
-        public IReadOnlyList<SessionHistoryRecord> Load() => _records.ToList();
+        public IReadOnlyList<SessionHistoryRecord> Load()
+        {
+            LoadCount++;
+            return _records.ToList();
+        }
 
         public void Append(SessionHistoryRecord record, int maxEntries = 10)
         {

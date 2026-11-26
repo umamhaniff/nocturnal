@@ -266,8 +266,6 @@ public sealed class AppUpdateService
             var isPerMachine = !string.IsNullOrWhiteSpace(programFiles)
                 && AppContext.BaseDirectory.StartsWith(programFiles, StringComparison.OrdinalIgnoreCase);
 
-            prepareForExit();
-
             Process.Start(new ProcessStartInfo
             {
                 FileName = finalPath,
@@ -275,8 +273,19 @@ public sealed class AppUpdateService
                 UseShellExecute = true
             });
 
+            prepareForExit();
             finalizeExit();
             return true;
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            SetState(new UpdateUiState(
+                UpdatePhase.Error,
+                CurrentVersion,
+                release,
+                0.0,
+                "Update cancelled by user"));
+            return false;
         }
         catch
         {

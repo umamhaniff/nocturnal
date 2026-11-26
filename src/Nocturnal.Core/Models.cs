@@ -125,7 +125,8 @@ public sealed record JournalEntry(
     bool LowPowerEngagedByApp,
     bool AutoSleepOnEnd,
     IReadOnlyList<SuspendedProcessRecord>? SuspendedProcesses = null,
-    ProcessWatchTarget? WatchTarget = null);
+    ProcessWatchTarget? WatchTarget = null,
+    int? OriginalEnergySaverThreshold = null);
 
 public sealed class AppConfig
 {

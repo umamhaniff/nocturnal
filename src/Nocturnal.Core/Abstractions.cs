@@ -7,7 +7,8 @@ public interface IPowerController
     LidActionBackup? ReadLidActionBackup();
     void ApplyClamshellMode(Guid schemeGuid);
     void RestoreClamshellMode(LidActionBackup backup);
-    bool TrySetPowerSaver(bool enabled);
+    int? ReadEnergySaverThreshold();
+    bool TrySetPowerSaver(bool enabled, int? restoreThreshold = null);
     void TurnOffDisplay();
     void SleepSystem();
 }
@@ -57,7 +58,12 @@ public interface ISessionHistoryStore
 
 public interface IAlertNotifier
 {
-    void Notify(AppConfig config, WebhookAlertEvent alert);
+    void Notify(AppConfig config, WebhookAlertEvent alert, bool waitForDelivery = false);
+}
+
+public interface IRecoveryHook
+{
+    void SetRecoveryArmed(bool armed);
 }
 
 public interface INetworkFailoverController
@@ -88,7 +94,12 @@ public sealed class NoOpSessionHistoryStore : ISessionHistoryStore
 
 public sealed class NoOpAlertNotifier : IAlertNotifier
 {
-    public void Notify(AppConfig config, WebhookAlertEvent alert) { }
+    public void Notify(AppConfig config, WebhookAlertEvent alert, bool waitForDelivery = false) { }
+}
+
+public sealed class NoOpRecoveryHook : IRecoveryHook
+{
+    public void SetRecoveryArmed(bool armed) { }
 }
 
 public sealed class NoOpNetworkFailoverController : INetworkFailoverController

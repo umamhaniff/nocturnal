@@ -54,8 +54,18 @@ public static class SchedulePolicy
         DateTimeOffset localNow,
         bool isSessionActive,
         bool isOnAcPower,
-        DateOnly? lastTriggeredDate)
+        DateOnly? lastTriggeredDate) =>
+        ShouldTriggerNightShift(config, localNow, isSessionActive, isOnAcPower, lastTriggeredDate, out _);
+
+    public static bool ShouldTriggerNightShift(
+        AppConfig config,
+        DateTimeOffset localNow,
+        bool isSessionActive,
+        bool isOnAcPower,
+        DateOnly? lastTriggeredDate,
+        out DateOnly triggerDate)
     {
+        triggerDate = DateOnly.FromDateTime(localNow.DateTime);
         if (!config.NightShiftEnabled || isSessionActive)
         {
             return false;
@@ -71,19 +81,40 @@ public static class SchedulePolicy
             return false;
         }
 
-        var today = DateOnly.FromDateTime(localNow.DateTime);
-        if (lastTriggeredDate == today)
-        {
-            return false;
-        }
-
         if (!TryParseTimeOfDay(config.NightShiftStartTime, out var start))
         {
             return false;
         }
 
+        var today = DateOnly.FromDateTime(localNow.DateTime);
         var current = localNow.TimeOfDay;
-        var windowEnd = start.Add(TimeSpan.FromMinutes(5));
-        return current >= start && current < windowEnd;
+        var windowSpan = TimeSpan.FromMinutes(5);
+        TimeSpan elapsed;
+
+        if (current >= start)
+        {
+            elapsed = current - start;
+            triggerDate = today;
+        }
+        else
+        {
+            var windowEnd = start.Add(windowSpan);
+            var wrapsMidnight = windowEnd >= TimeSpan.FromDays(1);
+            var wrappedEnd = wrapsMidnight ? windowEnd - TimeSpan.FromDays(1) : TimeSpan.Zero;
+            if (!wrapsMidnight || current >= wrappedEnd)
+            {
+                return false;
+            }
+
+            elapsed = (TimeSpan.FromDays(1) - start) + current;
+            triggerDate = today.AddDays(-1);
+        }
+
+        if (elapsed < TimeSpan.Zero || elapsed >= windowSpan)
+        {
+            return false;
+        }
+
+        return lastTriggeredDate != triggerDate;
     }
 }

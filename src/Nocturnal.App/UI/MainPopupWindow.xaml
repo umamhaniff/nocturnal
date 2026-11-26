@@ -43,6 +43,10 @@
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Track" Property="BorderBrush" Value="#475569" />
                             </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Track" Property="BorderBrush" Value="#34D399" />
+                                <Setter TargetName="Track" Property="BorderThickness" Value="1.5" />
+                            </Trigger>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="Track" Property="Background" Value="#10B981" />
                                 <Setter TargetName="Track" Property="BorderBrush" Value="#34D399" />
@@ -63,6 +67,105 @@
             </Setter>
         </Style>
 
+        <!-- Custom Dark CheckBox -->
+        <Style x:Key="DarkCheckBoxStyle" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="#CBD5E1" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Border x:Name="Box"
+                                    Width="15"
+                                    Height="15"
+                                    CornerRadius="4"
+                                    Background="#0B0E14"
+                                    BorderBrush="#334155"
+                                    BorderThickness="1"
+                                    Margin="0,0,7,0"
+                                    VerticalAlignment="Center">
+                                <Path x:Name="CheckMark"
+                                      Data="M3,7.5 L6.2,10.5 L12,4"
+                                      Stroke="#062017"
+                                      StrokeThickness="1.9"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      StrokeLineJoin="Round"
+                                      Visibility="Collapsed" />
+                            </Border>
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="#475569" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="#34D399" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Box" Property="Background" Value="#10B981" />
+                                <Setter TargetName="Box" Property="BorderBrush" Value="#34D399" />
+                                <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Dark Thin ScrollBar -->
+        <Style x:Key="ScrollThumbStyle" TargetType="Thumb">
+            <Setter Property="OverridesDefaultStyle" Value="True" />
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border x:Name="Bd" Background="#334155" CornerRadius="3" />
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#475569" />
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#34D399" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ScrollBar">
+            <Setter Property="OverridesDefaultStyle" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="Transparent">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False" />
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource ScrollThumbStyle}" MinHeight="24" />
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False" />
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="Orientation" Value="Vertical">
+                    <Setter Property="Width" Value="6" />
+                    <Setter Property="MinWidth" Value="6" />
+                    <Setter Property="Margin" Value="4,0,0,0" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <!-- Segmented Navigation / Style Selector -->
         <Style x:Key="SegmentTabStyle" TargetType="RadioButton">
             <Setter Property="Foreground" Value="#94A3B8" />
@@ -75,6 +178,8 @@
                     <ControlTemplate TargetType="RadioButton">
                         <Border x:Name="Bd"
                                 Background="Transparent"
+                                BorderBrush="Transparent"
+                                BorderThickness="1"
                                 CornerRadius="7"
                                 Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -82,6 +187,9 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter Property="Foreground" Value="#E2E8F0" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#34D399" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="#1E2634" />
@@ -117,6 +225,9 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="#242D3E" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#34D399" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
                                 <Setter TargetName="Bd" Property="BorderBrush" Value="#34D399" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
@@ -208,6 +319,9 @@
                                 <Setter TargetName="Bd" Property="BorderBrush" Value="#475569" />
                                 <Setter Property="Foreground" Value="#E2E8F0" />
                             </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#34D399" />
+                            </Trigger>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="#112A24" />
                                 <Setter TargetName="Bd" Property="BorderBrush" Value="#10B981" />
@@ -237,6 +351,51 @@
                                 BorderThickness="{TemplateBinding BorderThickness}"
                                 CornerRadius="7"
                                 Padding="{TemplateBinding Padding}">
+                            <Grid>
+                                <TextBlock x:Name="Placeholder"
+                                           Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"
+                                           Foreground="#6B7B93"
+                                           FontSize="{TemplateBinding FontSize}"
+                                           VerticalAlignment="Center"
+                                           IsHitTestVisible="False"
+                                           Visibility="Collapsed" />
+                                <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Text" Value="">
+                                <Setter TargetName="Placeholder" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="Text" Value="{x:Null}">
+                                <Setter TargetName="Placeholder" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#34D399" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Dark Masked Password Box -->
+        <Style x:Key="DarkPasswordStyle" TargetType="PasswordBox">
+            <Setter Property="Background" Value="#0B0E14" />
+            <Setter Property="Foreground" Value="#F1F5F9" />
+            <Setter Property="BorderBrush" Value="#262F3F" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="CaretBrush" Value="#34D399" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="PasswordBox">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="7"
+                                Padding="{TemplateBinding Padding}">
                             <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
@@ -252,20 +411,54 @@
         <!-- Minimal Header Icon Button -->
         <Style x:Key="IconButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#64748B" />
+            <Setter Property="Foreground" Value="#8A99B0" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Width" Value="28" />
             <Setter Property="Height" Value="28" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="7">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="7">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="#1E2430" />
+                                <Setter Property="Foreground" Value="#E2E8F0" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#34D399" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DangerIconButtonStyle" TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="7">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2A161D" />
                                 <Setter Property="Foreground" Value="#F87171" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#F87171" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -282,7 +475,7 @@
             Padding="16"
             Margin="8">
         <Border.Effect>
-            <DropShadowEffect BlurRadius="22" ShadowDepth="6" Opacity="0.65" Color="#000000" />
+            <DropShadowEffect BlurRadius="14" ShadowDepth="4" Opacity="0.6" Color="#000000" />
         </Border.Effect>
 
         <StackPanel>
@@ -332,7 +525,7 @@
 
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Text="Nocturnal" FontSize="14" FontWeight="SemiBold" Foreground="#F1F5F9" />
-                        <TextBlock x:Name="HeaderStatusText" Text="Idle" FontSize="11" Foreground="#64748B" />
+                        <TextBlock x:Name="HeaderStatusText" Text="Idle" FontSize="11" Foreground="#8A99B0" />
                     </StackPanel>
                 </StackPanel>
 
@@ -364,7 +557,7 @@
                               Width="14"
                               Height="14" />
                     </Button>
-                    <Button Style="{StaticResource IconButtonStyle}"
+                    <Button Style="{StaticResource DangerIconButtonStyle}"
                             ToolTip="Quit Nocturnal"
                             Click="Exit_Click">
                         <Path Data="M3,3 L11,11 M11,3 L3,11"
@@ -494,6 +687,8 @@
                                    Text="Pick duration"
                                    FontSize="11"
                                    Foreground="#94A3B8"
+                                   MaxWidth="116"
+                                   TextTrimming="CharacterEllipsis"
                                    HorizontalAlignment="Center"
                                    Margin="0,2,0,0" />
                     </StackPanel>
@@ -530,15 +725,15 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Margin="0,0,6,0">
-                            <TextBlock Text="Days" FontSize="10" Foreground="#64748B" Margin="2,0,0,3" />
+                            <TextBlock Text="Days" FontSize="10" Foreground="#8A99B0" Margin="2,0,0,3" />
                             <TextBox x:Name="DaysBox" Text="0" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Margin="0,0,6,0">
-                            <TextBlock Text="Hrs" FontSize="10" Foreground="#64748B" Margin="2,0,0,3" />
+                            <TextBlock Text="Hrs" FontSize="10" Foreground="#8A99B0" Margin="2,0,0,3" />
                             <TextBox x:Name="HoursBox" Text="1" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" />
                         </StackPanel>
                         <StackPanel Grid.Column="2" Margin="0,0,8,0">
-                            <TextBlock Text="Mins" FontSize="10" Foreground="#64748B" Margin="2,0,0,3" />
+                            <TextBlock Text="Mins" FontSize="10" Foreground="#8A99B0" Margin="2,0,0,3" />
                             <TextBox x:Name="MinutesBox" Text="0" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" />
                         </StackPanel>
                         <Button Grid.Column="3"
@@ -561,7 +756,7 @@
                     <StackPanel>
                         <TextBlock Text="Awake until process exits (e.g. python, dotnet)"
                                    FontSize="10.5"
-                                   Foreground="#64748B"
+                                   Foreground="#8A99B0"
                                    Margin="2,0,0,5" />
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -570,6 +765,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="WatchProcessBox"
+                                     Tag="e.g. python, dotnet"
                                      Style="{StaticResource DarkInputStyle}"
                                      KeyDown="WatchProcessBox_KeyDown"
                                      Margin="0,0,6,0" />
@@ -603,7 +799,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel>
                                 <TextBlock Text="Clamshell Mode" FontSize="12.5" FontWeight="SemiBold" Foreground="#F1F5F9" />
-                                <TextBlock Text="Stay awake with lid closed" FontSize="11" Foreground="#64748B" />
+                                <TextBlock Text="Stay awake with lid closed" FontSize="11" Foreground="#8A99B0" />
                             </StackPanel>
                             <CheckBox x:Name="ClamshellSwitch"
                                       Grid.Column="1"
@@ -620,7 +816,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Margin="0,0,8,0">
                                 <TextBlock Text="Agent Focus" FontSize="12.5" FontWeight="SemiBold" Foreground="#F1F5F9" />
-                                <TextBlock x:Name="FocusSummaryText" Text="Throttle non-agent apps" FontSize="11" Foreground="#64748B" />
+                                <TextBlock x:Name="FocusSummaryText" Text="Throttle non-agent apps" FontSize="11" Foreground="#8A99B0" />
                             </StackPanel>
                             <CheckBox x:Name="AgentFocusSwitch"
                                       Grid.Column="1"
@@ -634,14 +830,14 @@
                 <TextBlock x:Name="TelemetryText"
                            Text="AC • 100%"
                            FontSize="11"
-                           Foreground="#64748B"
+                           Foreground="#8A99B0"
                            HorizontalAlignment="Center"
                            Margin="0,0,0,2" />
 
                 <TextBlock x:Name="LastSessionText"
                            Text="No recent sessions"
                            FontSize="10.5"
-                           Foreground="#475569"
+                           Foreground="#8B9BB4"
                            HorizontalAlignment="Center"
                            Margin="0,0,0,8" />
 
@@ -684,7 +880,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Margin="0,0,8,0">
                                 <TextBlock Text="EcoQoS + RAM Trim" FontSize="12.5" FontWeight="SemiBold" Foreground="#F1F5F9" />
-                                <TextBlock Text="Throttle &amp; trim idle RAM of non-agent apps" FontSize="11" Foreground="#64748B" />
+                                <TextBlock Text="Throttle &amp; trim idle RAM of non-agent apps" FontSize="11" Foreground="#8A99B0" />
                             </StackPanel>
                             <CheckBox x:Name="EcoQosSwitch"
                                       Grid.Column="1"
@@ -696,7 +892,7 @@
 
                         <StackPanel>
                             <TextBlock Text="Selected Apps Action" FontSize="12.5" FontWeight="SemiBold" Foreground="#F1F5F9" />
-                            <TextBlock Text="Pause freezes &amp; auto-resumes; Close sends graceful close" FontSize="11" Foreground="#64748B" Margin="0,1,0,8" />
+                            <TextBlock Text="Pause freezes &amp; auto-resumes; Close sends graceful close" FontSize="11" Foreground="#8A99B0" Margin="0,1,0,8" />
                             <Border Background="#0E121A" BorderBrush="#222936" BorderThickness="1" CornerRadius="9" Padding="3">
                                 <UniformGrid Columns="3">
                                     <RadioButton x:Name="ModeOffRadio" Content="Off" Tag="Off" GroupName="SelectedAppModeGroup" Style="{StaticResource SegmentTabStyle}" Checked="SelectedAppModeRadio_Checked" />
@@ -726,7 +922,7 @@
                             <ToggleButton Content="Slack" Tag="Slack" Style="{StaticResource ChipToggleStyle}" Click="AppChip_Click" />
                             <ToggleButton Content="Browsers" Tag="chrome,msedge,brave,firefox,opera,arc" ToolTip="User browsers only — AI agent &amp; Playwright browsers stay protected" Style="{StaticResource ChipToggleStyle}" Click="AppChip_Click" />
                         </WrapPanel>
-                        <TextBlock Text="Extra Apps (comma-separated)" FontSize="10.5" Foreground="#64748B" Margin="0,4,0,4" />
+                        <TextBlock Text="Extra Apps (comma-separated)" FontSize="10.5" Foreground="#8A99B0" Margin="0,4,0,4" />
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -734,6 +930,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="CustomAppsBox"
+                                     Tag="e.g. obs64, notion"
                                      Style="{StaticResource DarkInputStyle}"
                                      LostFocus="CustomAppsBox_LostFocus"
                                      KeyDown="CustomAppsBox_KeyDown"
@@ -767,6 +964,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="CustomWhitelistBox"
+                                     Tag="e.g. ollama, docker"
                                      Style="{StaticResource DarkInputStyle}"
                                      LostFocus="CustomWhitelistBox_LostFocus"
                                      KeyDown="CustomWhitelistBox_KeyDown"
@@ -786,7 +984,7 @@
                         <TextBlock Text="Protects process trees &amp; remote desktop (agy, Claude, Gemini, Codex, Node, Python, Docker, Terminal, VS Code, Chrome Remote Desktop)."
                                    TextWrapping="Wrap"
                                    FontSize="10.5"
-                                   Foreground="#64748B" />
+                                   Foreground="#8A99B0" />
                     </StackPanel>
                 </Border>
             </StackPanel>
@@ -867,11 +1065,11 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Margin="0,0,6,0">
-                            <TextBlock Text="Low Power %" FontSize="10.5" Foreground="#64748B" Margin="2,0,0,3" />
+                            <TextBlock Text="Low Power %" FontSize="10.5" Foreground="#8A99B0" Margin="2,0,0,3" />
                             <TextBox x:Name="LowPowerPctBox" Text="40" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" LostFocus="BatteryThreshold_LostFocus" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Margin="6,0,0,0">
-                            <TextBlock Text="Critical Sleep %" FontSize="10.5" Foreground="#64748B" Margin="2,0,0,3" />
+                            <TextBlock Text="Critical Sleep %" FontSize="10.5" Foreground="#8A99B0" Margin="2,0,0,3" />
                             <TextBox x:Name="CriticalPctBox" Text="10" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" LostFocus="BatteryThreshold_LostFocus" />
                         </StackPanel>
                     </Grid>
@@ -884,49 +1082,56 @@
                         Padding="12,10"
                         Margin="0,0,0,10">
                     <StackPanel>
-                        <Grid Margin="0,0,0,8">
+                        <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <TextBlock Text="Night Shift Schedule" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
-                                <TextBlock Text="Auto-start daily at scheduled time" FontSize="10.5" Foreground="#64748B" />
+                            <StackPanel Background="Transparent"
+                                        Cursor="Hand"
+                                        MouseLeftButtonUp="NightShiftHeader_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="NightShiftChevron" Text="▸ " FontSize="11" Foreground="#8A99B0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Night Shift Schedule" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                                </StackPanel>
+                                <TextBlock Text="Auto-start daily at scheduled time" FontSize="10.5" Foreground="#8A99B0" />
                             </StackPanel>
                             <CheckBox x:Name="NightShiftSwitch" Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" Click="NightShiftSwitch_Click" />
                         </Grid>
 
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0" Margin="0,0,6,0">
-                                <TextBlock Text="Start (HH:mm)" FontSize="10" Foreground="#64748B" Margin="2,0,0,3" />
-                                <TextBox x:Name="NightShiftTimeBox" Text="22:00" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" LostFocus="NightShiftBox_LostFocus" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="1" Margin="6,0,0,0">
-                                <TextBlock Text="Duration (mins)" FontSize="10" Foreground="#64748B" Margin="2,0,0,3" />
-                                <TextBox x:Name="NightShiftDurationBox" Text="240" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" LostFocus="NightShiftBox_LostFocus" />
-                            </StackPanel>
-                        </Grid>
+                        <StackPanel x:Name="NightShiftBody" Margin="0,8,0,0" Visibility="Collapsed">
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                                    <TextBlock Text="Start (HH:mm)" FontSize="10" Foreground="#8A99B0" Margin="2,0,0,3" />
+                                    <TextBox x:Name="NightShiftTimeBox" Text="22:00" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" LostFocus="NightShiftBox_LostFocus" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                                    <TextBlock Text="Duration (mins)" FontSize="10" Foreground="#8A99B0" Margin="2,0,0,3" />
+                                    <TextBox x:Name="NightShiftDurationBox" Text="240" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" LostFocus="NightShiftBox_LostFocus" />
+                                </StackPanel>
+                            </Grid>
 
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Require AC power" FontSize="11.5" Foreground="#CBD5E1" VerticalAlignment="Center" />
-                            <CheckBox x:Name="NightShiftAcSwitch" Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" Click="NightShiftAcSwitch_Click" />
-                        </Grid>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Require AC power" FontSize="11.5" Foreground="#CBD5E1" VerticalAlignment="Center" />
+                                <CheckBox x:Name="NightShiftAcSwitch" Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" Click="NightShiftAcSwitch_Click" />
+                            </Grid>
 
-                        <Border Background="#0E121A" BorderBrush="#222936" BorderThickness="1" CornerRadius="8" Padding="3">
-                            <UniformGrid Columns="3">
-                                <RadioButton x:Name="NsAiRadio" Content="AI Night" Tag="AI Overnight" GroupName="NightShiftProfileGroup" Style="{StaticResource SegmentTabStyle}" Checked="NightShiftProfile_Checked" />
-                                <RadioButton x:Name="NsBuildRadio" Content="Build" Tag="Build / Scraper" GroupName="NightShiftProfileGroup" Style="{StaticResource SegmentTabStyle}" Checked="NightShiftProfile_Checked" />
-                                <RadioButton x:Name="NsPresentRadio" Content="Present" Tag="Presentation" GroupName="NightShiftProfileGroup" Style="{StaticResource SegmentTabStyle}" Checked="NightShiftProfile_Checked" />
-                            </UniformGrid>
-                        </Border>
+                            <Border Background="#0E121A" BorderBrush="#222936" BorderThickness="1" CornerRadius="8" Padding="3">
+                                <UniformGrid Columns="3">
+                                    <RadioButton x:Name="NsAiRadio" Content="AI Night" Tag="AI Overnight" GroupName="NightShiftProfileGroup" Style="{StaticResource SegmentTabStyle}" Checked="NightShiftProfile_Checked" />
+                                    <RadioButton x:Name="NsBuildRadio" Content="Build" Tag="Build / Scraper" GroupName="NightShiftProfileGroup" Style="{StaticResource SegmentTabStyle}" Checked="NightShiftProfile_Checked" />
+                                    <RadioButton x:Name="NsPresentRadio" Content="Present" Tag="Presentation" GroupName="NightShiftProfileGroup" Style="{StaticResource SegmentTabStyle}" Checked="NightShiftProfile_Checked" />
+                                </UniformGrid>
+                            </Border>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
@@ -937,23 +1142,29 @@
                         Padding="12,10"
                         Margin="0,0,0,10">
                     <StackPanel>
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <TextBlock Text="Wi-Fi / Hotspot Failover" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
-                                <TextBlock Text="Switch to saved backup SSID if offline" FontSize="10.5" Foreground="#64748B" />
-                            </StackPanel>
-                            <CheckBox x:Name="WifiFailoverSwitch" Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" Click="WifiFailoverSwitch_Click" />
-                        </Grid>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
+                            <StackPanel Background="Transparent"
+                                        Cursor="Hand"
+                                        MouseLeftButtonUp="WifiFailoverHeader_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="WifiFailoverChevron" Text="▸ " FontSize="11" Foreground="#8A99B0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Wi-Fi / Hotspot Failover" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                                </StackPanel>
+                                <TextBlock Text="Switch to saved backup SSID if offline" FontSize="10.5" Foreground="#8A99B0" />
+                            </StackPanel>
+                            <CheckBox x:Name="WifiFailoverSwitch" Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" Click="WifiFailoverSwitch_Click" />
+                        </Grid>
+                        <Grid x:Name="WifiFailoverBody" Margin="0,8,0,0" Visibility="Collapsed">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
                             <TextBox x:Name="BackupSsidBox"
+                                     Tag="Backup Wi-Fi / hotspot SSID"
                                      Style="{StaticResource DarkInputStyle}"
                                      LostFocus="BackupSsidBox_LostFocus"
                                      Margin="0,0,6,0" />
@@ -973,46 +1184,75 @@
                         Padding="12,10"
                         Margin="0,0,0,10">
                     <StackPanel>
-                        <Grid Margin="0,0,0,8">
+                        <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <TextBlock Text="Phone / Webhook Alerts" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
-                                <TextBlock x:Name="AlertStatusText" Text="Discord, Telegram, or HTTPS webhook" FontSize="10.5" Foreground="#64748B" />
+                            <StackPanel Background="Transparent"
+                                        Cursor="Hand"
+                                        MouseLeftButtonUp="AlertsHeader_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="AlertsChevron" Text="▸ " FontSize="11" Foreground="#8A99B0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Phone / Webhook Alerts" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                                </StackPanel>
+                                <TextBlock x:Name="AlertStatusText" Text="Discord, Telegram, or HTTPS webhook" FontSize="10.5" Foreground="#8A99B0" />
                             </StackPanel>
                             <CheckBox x:Name="AlertsSwitch" Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" Click="AlertsSwitch_Click" />
                         </Grid>
 
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBox x:Name="WebhookUrlBox"
-                                     Style="{StaticResource DarkInputStyle}"
-                                     LostFocus="WebhookUrlBox_LostFocus"
-                                     Margin="0,0,6,0" />
-                            <Button Grid.Column="1"
-                                    Content="Save"
-                                    Style="{StaticResource PresetButtonStyle}"
-                                    Padding="9,5"
-                                    Margin="0,0,6,0"
-                                    Click="SaveWebhookUrl_Click" />
-                            <Button x:Name="TestWebhookBtn"
-                                    Grid.Column="2"
-                                    Content="Test"
-                                    Style="{StaticResource PresetButtonStyle}"
-                                    Padding="9,5"
-                                    Click="TestWebhook_Click" />
-                        </Grid>
+                        <StackPanel x:Name="AlertsBody" Margin="0,8,0,0" Visibility="Collapsed">
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Grid Grid.Column="0" Margin="0,0,6,0">
+                                    <PasswordBox x:Name="WebhookPasswordBox"
+                                                 Style="{StaticResource DarkPasswordStyle}"
+                                                 PasswordChanged="WebhookPasswordBox_PasswordChanged"
+                                                 LostFocus="WebhookUrlBox_LostFocus" />
+                                    <TextBlock x:Name="WebhookPlaceholder"
+                                               Text="https://discord.com/api/webhooks/..."
+                                               Foreground="#6B7B93"
+                                               FontSize="12"
+                                               Margin="9,0,6,0"
+                                               VerticalAlignment="Center"
+                                               IsHitTestVisible="False" />
+                                    <TextBox x:Name="WebhookUrlBox"
+                                             Tag="https://discord.com/api/webhooks/..."
+                                             Style="{StaticResource DarkInputStyle}"
+                                             Visibility="Collapsed"
+                                             LostFocus="WebhookUrlBox_LostFocus" />
+                                </Grid>
+                                <Button x:Name="ToggleWebhookRevealBtn"
+                                        Grid.Column="1"
+                                        Content="Show"
+                                        Style="{StaticResource PresetButtonStyle}"
+                                        Padding="8,5"
+                                        Margin="0,0,6,0"
+                                        Click="ToggleWebhookReveal_Click" />
+                                <Button Grid.Column="2"
+                                        Content="Save"
+                                        Style="{StaticResource PresetButtonStyle}"
+                                        Padding="9,5"
+                                        Margin="0,0,6,0"
+                                        Click="SaveWebhookUrl_Click" />
+                                <Button x:Name="TestWebhookBtn"
+                                        Grid.Column="3"
+                                        Content="Test"
+                                        Style="{StaticResource PresetButtonStyle}"
+                                        Padding="9,5"
+                                        Click="TestWebhook_Click" />
+                            </Grid>
 
-                        <UniformGrid Columns="2">
-                            <CheckBox x:Name="AlertOnCompletionCheck" Content="On completion" Foreground="#CBD5E1" FontSize="11" Cursor="Hand" Click="AlertFilterCheck_Click" />
-                            <CheckBox x:Name="AlertOnGuardCheck" Content="On safety guard" Foreground="#CBD5E1" FontSize="11" Cursor="Hand" Click="AlertFilterCheck_Click" />
-                        </UniformGrid>
+                            <UniformGrid Columns="2">
+                                <CheckBox x:Name="AlertOnCompletionCheck" Content="On completion" Style="{StaticResource DarkCheckBoxStyle}" Click="AlertFilterCheck_Click" />
+                                <CheckBox x:Name="AlertOnGuardCheck" Content="On safety guard" Style="{StaticResource DarkCheckBoxStyle}" Click="AlertFilterCheck_Click" />
+                            </UniformGrid>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
@@ -1039,8 +1279,8 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
-                                <TextBlock x:Name="VersionText" Text="Nocturnal v1.3.0" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
-                                <TextBlock x:Name="UpdateStatusText" Text="Check GitHub Releases" FontSize="10.5" Foreground="#64748B" />
+                                <TextBlock x:Name="VersionText" Text="Nocturnal v1.3.1" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                                <TextBlock x:Name="UpdateStatusText" Text="Check GitHub Releases" FontSize="10.5" Foreground="#8A99B0" />
                             </StackPanel>
                             <Button x:Name="CheckUpdateBtn"
                                     Grid.Column="1"

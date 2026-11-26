@@ -18,11 +18,48 @@ public sealed class Win32PowerController : IPowerController
     private static readonly Guid LidAction = new("5ca83367-6e45-459f-a27b-476b1d01c936");
     private static readonly Guid SubEnergySaver = new("de830923-a562-41af-a086-e3a2c6bad2da");
     private static readonly Guid EsBattThreshold = new("e69653ca-cf7f-4f05-aa73-cb833fa90ad4");
+    private static readonly IntPtr InvalidHandleValue = new(-1);
+
+    private const uint PowerRequestContextVersion = 0;
+    private const uint PowerRequestContextSimpleString = 0x00000001;
+
+    private enum PowerRequestType
+    {
+        DisplayRequired = 0,
+        SystemRequired = 1,
+        AwayModeRequired = 2,
+        ExecutionRequired = 3
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PowerRequestContext
+    {
+        public uint Version;
+        public uint Flags;
+        public IntPtr SimpleReasonString;
+        public ulong Reserved1;
+        public IntPtr Reserved2;
+    }
 
     private uint? _originalEnergySaverThreshold;
+    private IntPtr _powerRequestHandle;
+    private bool _executionRequestActive;
+    private bool _displayRequestActive;
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern ExecutionState SetThreadExecutionState(ExecutionState esFlags);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr PowerCreateRequest(ref PowerRequestContext context);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool PowerSetRequest(IntPtr powerRequest, PowerRequestType requestType);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool PowerClearRequest(IntPtr powerRequest, PowerRequestType requestType);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
 
     [DllImport("powrprof.dll", SetLastError = true)]
     private static extern uint PowerGetActiveScheme(IntPtr userRootPowerKey, out IntPtr activePolicyGuid);
@@ -79,11 +116,98 @@ public sealed class Win32PowerController : IPowerController
             flags |= ExecutionState.EsDisplayRequired;
         }
         SetThreadExecutionState(flags);
+
+        EnsurePowerRequestHandle();
+        if (_powerRequestHandle != IntPtr.Zero)
+        {
+            if (!_executionRequestActive)
+            {
+                PowerSetRequest(_powerRequestHandle, PowerRequestType.SystemRequired);
+                PowerSetRequest(_powerRequestHandle, PowerRequestType.ExecutionRequired);
+                _executionRequestActive = true;
+            }
+
+            if (keepDisplayAwake && !_displayRequestActive)
+            {
+                PowerSetRequest(_powerRequestHandle, PowerRequestType.DisplayRequired);
+                _displayRequestActive = true;
+            }
+            else if (!keepDisplayAwake && _displayRequestActive)
+            {
+                PowerClearRequest(_powerRequestHandle, PowerRequestType.DisplayRequired);
+                _displayRequestActive = false;
+            }
+        }
     }
 
     public void DisableAwakeAssertion()
     {
+        if (_powerRequestHandle != IntPtr.Zero)
+        {
+            try
+            {
+                if (_displayRequestActive)
+                {
+                    PowerClearRequest(_powerRequestHandle, PowerRequestType.DisplayRequired);
+                }
+
+                if (_executionRequestActive)
+                {
+                    PowerClearRequest(_powerRequestHandle, PowerRequestType.ExecutionRequired);
+                    PowerClearRequest(_powerRequestHandle, PowerRequestType.SystemRequired);
+                }
+            }
+            catch
+            {
+                // Ignore clear failures during shutdown/sleep transitions.
+            }
+            finally
+            {
+                CloseHandle(_powerRequestHandle);
+                _powerRequestHandle = IntPtr.Zero;
+                _displayRequestActive = false;
+                _executionRequestActive = false;
+            }
+        }
+
         SetThreadExecutionState(ExecutionState.EsContinuous);
+    }
+
+    private void EnsurePowerRequestHandle()
+    {
+        if (_powerRequestHandle != IntPtr.Zero)
+        {
+            return;
+        }
+
+        var reasonPtr = IntPtr.Zero;
+        try
+        {
+            reasonPtr = Marshal.StringToHGlobalUni("Nocturnal active keep-awake session");
+            var context = new PowerRequestContext
+            {
+                Version = PowerRequestContextVersion,
+                Flags = PowerRequestContextSimpleString,
+                SimpleReasonString = reasonPtr
+            };
+
+            var handle = PowerCreateRequest(ref context);
+            if (handle != IntPtr.Zero && handle != InvalidHandleValue)
+            {
+                _powerRequestHandle = handle;
+            }
+        }
+        catch
+        {
+            _powerRequestHandle = IntPtr.Zero;
+        }
+        finally
+        {
+            if (reasonPtr != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(reasonPtr);
+            }
+        }
     }
 
     public LidActionBackup? ReadLidActionBackup()
@@ -131,7 +255,28 @@ public sealed class Win32PowerController : IPowerController
         PowerSetActiveScheme(IntPtr.Zero, ref schemeGuid);
     }
 
-    public bool TrySetPowerSaver(bool enabled)
+    public int? ReadEnergySaverThreshold()
+    {
+        try
+        {
+            if (!TryGetActiveScheme(out var schemeGuid))
+            {
+                return null;
+            }
+
+            var sub = SubEnergySaver;
+            var setting = EsBattThreshold;
+            return PowerReadDCValueIndex(IntPtr.Zero, ref schemeGuid, ref sub, ref setting, out var orig) == 0
+                ? (int)orig
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public bool TrySetPowerSaver(bool enabled, int? restoreThreshold = null)
     {
         try
         {
@@ -156,7 +301,9 @@ public sealed class Win32PowerController : IPowerController
                 return res == 0;
             }
 
-            var restore = _originalEnergySaverThreshold ?? 20u;
+            var restore = restoreThreshold is >= 0 and <= 100
+                ? (uint)restoreThreshold.Value
+                : (_originalEnergySaverThreshold ?? 20u);
             _originalEnergySaverThreshold = null;
             var restoreRes = PowerWriteDCValueIndex(IntPtr.Zero, ref schemeGuid, ref sub, ref setting, restore);
             PowerSetActiveScheme(IntPtr.Zero, ref schemeGuid);

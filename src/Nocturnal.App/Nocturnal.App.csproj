@@ -7,7 +7,7 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>Nocturnal</AssemblyName>
-    <Version>1.3.0</Version>
+    <Version>1.3.1</Version>
     <Product>Nocturnal</Product>
     <Authors>Hans x Gravi</Authors>
     <Description>Lightweight Windows System Tray utility to keep your laptop awake safely for AI agents and timed sessions.</Description>

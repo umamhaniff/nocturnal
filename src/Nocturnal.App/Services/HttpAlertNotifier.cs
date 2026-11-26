@@ -11,7 +11,7 @@ public sealed class HttpAlertNotifier : IAlertNotifier
         Timeout = TimeSpan.FromSeconds(8)
     };
 
-    public void Notify(AppConfig config, WebhookAlertEvent alert)
+    public void Notify(AppConfig config, WebhookAlertEvent alert, bool waitForDelivery = false)
     {
         if (!config.AlertsEnabled || !WebhookPolicy.IsValidWebhookUrl(config.AlertWebhookUrl))
         {
@@ -21,18 +21,34 @@ public sealed class HttpAlertNotifier : IAlertNotifier
         var url = config.AlertWebhookUrl.Trim();
         var payload = WebhookPolicy.BuildJsonPayload(alert, url);
 
-        _ = Task.Run(async () =>
+        if (waitForDelivery)
         {
             try
             {
-                using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-                using var resp = await Http.PostAsync(url, content).ConfigureAwait(false);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                Task.Run(() => SendPayloadAsync(url, payload, cts.Token)).Wait(TimeSpan.FromMilliseconds(3200));
             }
             catch
             {
-                // Alert failures must never disrupt power restoration or UI loops.
+                // Bounded delivery attempt must never prevent sleep or power restoration.
             }
-        });
+            return;
+        }
+
+        _ = Task.Run(() => SendPayloadAsync(url, payload, CancellationToken.None));
+    }
+
+    private static async Task SendPayloadAsync(string url, string payload, CancellationToken ct)
+    {
+        try
+        {
+            using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+            using var resp = await Http.PostAsync(url, content, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Alert failures must never disrupt power restoration or UI loops.
+        }
     }
 
     public async Task<(bool Ok, string Message)> SendTestAlertAsync(AppConfig config, CancellationToken ct = default)

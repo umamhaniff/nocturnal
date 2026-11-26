@@ -82,13 +82,14 @@ public partial class App : System.Windows.Application
             processWatcher: new WindowsProcessWatcher(),
             historyStore: new FileSessionHistoryStore(),
             alertNotifier: _alertNotifier,
-            networkFailover: new WindowsWifiFailoverController());
+            networkFailover: new WindowsWifiFailoverController(),
+            recoveryHook: new WindowsRecoveryHook());
 
         // Restore any stale power state from a previous crash, then populate initial telemetry.
         _engine.RecoverIfNeeded();
         _engine.Tick();
 
-        _ipcServer = new NocturnalIpcServer(_engine, Dispatcher);
+        _ipcServer = new NocturnalIpcServer(_engine, Dispatcher, () => _popup?.SyncFromConfigIfVisible());
         _ipcServer.Start();
 
         SystemEvents.SessionEnding += OnSessionEnding;
@@ -116,6 +117,7 @@ public partial class App : System.Windows.Application
             Dispatcher.Invoke(() =>
             {
                 _trayIcon?.Update(status);
+                _popup?.SyncFromConfigIfVisible();
                 _popup?.UpdateStatus(status, _engine.LatestSnapshot);
             });
         };
@@ -177,6 +179,11 @@ public partial class App : System.Windows.Application
 
     private void SafeRestoreOnCrash()
     {
+        if (_isExiting)
+        {
+            return;
+        }
+
         try
         {
             _engine?.Stop(StopReason.AppExiting);

@@ -39,7 +39,7 @@
 
 Closing a Windows laptop lid immediately suspends long builds, web scrapers, local servers, and autonomous AI coding runs. Standard keep-awake utilities either keep the lid-sleep trigger enabled, leave Windows power settings altered after an unexpected crash, or allow idle desktop apps to exhaust tight 8 GB RAM budgets.
 
-**Nocturnal** solves all three from a lightweight Windows System Tray app (~20–35 MB idle RAM):
+**Nocturnal** solves all three from a lightweight Windows System Tray app (~48 MB private / ~105 MB working set idle RAM, automatically trimmed when hidden):
 
 1. Holds native Windows power execution assertions and temporarily switches lid-close behavior to *Do Nothing* (`AC` & `DC`) for your chosen timer.
 2. Logs original Windows power states and any paused processes to disk *before* applying changes, recovering automatically after crashes or reboots.
@@ -109,13 +109,13 @@ Start Session
 ## Installation
 
 ### Option 1: Windows Installer (Recommended — No .NET Runtime Required)
-1. Download the latest `Nocturnal-Setup-1.3.0.exe` from [**GitHub Releases**](https://github.com/umamhaniff/nocturnal/releases/latest).
+1. Download the latest `Nocturnal-Setup-1.3.1.exe` from [**GitHub Releases**](https://github.com/umamhaniff/nocturnal/releases/latest).
 2. Run the installer—installs per-user by default (no administrator prompt required), registers a Start Menu shortcut, adds `nocturnal-cli` to your user `PATH`, optional startup autostart, and a clean uninstaller.
 
 Silent per-user installation / upgrade:
 
 ```powershell
-.\Nocturnal-Setup-1.3.0.exe /VERYSILENT /CURRENTUSER
+.\Nocturnal-Setup-1.3.1.exe /VERYSILENT /CURRENTUSER
 ```
 
 ### Terminal & AI Agent CLI (`nocturnal-cli`)
@@ -149,7 +149,7 @@ dotnet run --project tests/Nocturnal.Tests
 # Run from source
 dotnet run --project src/Nocturnal.App
 
-# Build self-contained win-x64 installer -> dist\Nocturnal-Setup-1.3.0.exe
+# Build self-contained win-x64 installer -> dist\Nocturnal-Setup-1.3.1.exe
 .\scripts\build-installer.ps1
 
 # Or publish framework-dependent single-file portable executable

@@ -67,7 +67,12 @@ try {
     & $iscc (Join-Path $repoRoot 'installer\Nocturnal.iss')
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    $setupExe = Get-Item (Join-Path $repoRoot 'dist\Nocturnal-Setup-1.3.0.exe')
+    $setupExe = Get-ChildItem (Join-Path $repoRoot 'dist\Nocturnal-Setup-*.exe') |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
+    if (-not $setupExe) {
+        throw "Compiled installer not found in dist\"
+    }
     $sizeMb = [Math]::Round($setupExe.Length / 1MB, 2)
     Write-Host "Built installer: $($setupExe.FullName) ($sizeMb MB)"
 }

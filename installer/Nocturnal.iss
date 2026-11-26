@@ -1,5 +1,5 @@
 #define MyAppName "Nocturnal"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.3.1"
 #define MyAppPublisher "Hans x Gravi"
 #define MyAppURL "https://github.com/umamhaniff/nocturnal"
 #define MyAppExeName "Nocturnal.exe"
@@ -17,6 +17,7 @@ DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=commandline
+ChangesEnvironment=yes
 OutputDir=..\dist
 OutputBaseFilename=Nocturnal-Setup-{#MyAppVersion}
 SetupIconFile=..\src\Nocturnal.App\Assets\nocturnal.ico
@@ -78,7 +79,7 @@ function SetEvent(hEvent: THandle): BOOL;
 function CloseHandle(hObject: THandle): BOOL;
   external 'CloseHandle@kernel32.dll stdcall';
 
-function InitializeSetup(): Boolean;
+procedure CloseRunningNocturnal();
 var
   hEvent: THandle;
   WaitMs: Integer;
@@ -111,6 +112,17 @@ begin
       end;
     end;
   end;
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  CloseRunningNocturnal();
+  Result := True;
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  CloseRunningNocturnal();
   Result := True;
 end;
 
@@ -156,18 +168,24 @@ begin
   end;
 
   UpdatedPath := CurrentPath;
-  P := Pos(';' + Lowercase(Dir), Lowercase(UpdatedPath));
+  P := Pos(';' + Lowercase(Dir) + ';', ';' + Lowercase(UpdatedPath) + ';');
   if P > 0 then
   begin
-    Delete(UpdatedPath, P, Length(Dir) + 1);
-  end
-  else if Pos(Lowercase(Dir) + ';', Lowercase(UpdatedPath)) = 1 then
-  begin
-    Delete(UpdatedPath, 1, Length(Dir) + 1);
-  end
-  else if Lowercase(UpdatedPath) = Lowercase(Dir) then
-  begin
-    UpdatedPath := '';
+    if P = 1 then
+    begin
+      if Length(UpdatedPath) <= Length(Dir) then
+      begin
+        UpdatedPath := '';
+      end
+      else
+      begin
+        Delete(UpdatedPath, 1, Length(Dir) + 1);
+      end;
+    end
+    else
+    begin
+      Delete(UpdatedPath, P - 1, Length(Dir) + 1);
+    end;
   end;
 
   if UpdatedPath <> CurrentPath then

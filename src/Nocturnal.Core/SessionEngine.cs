@@ -6,6 +6,14 @@ namespace Nocturnal.Core;
 /// </summary>
 public sealed class SessionEngine
 {
+    private sealed record ProfileBaseline(
+        bool ClamshellEnabled,
+        bool AgentFocusEnabled,
+        SelectedAppMode FocusSelectedAppMode,
+        bool FocusCloseSelectedApps,
+        bool KeepDisplayAwake,
+        bool AutoSleepOnCompletion);
+
     private readonly IPowerController _power;
     private readonly ISystemMonitor _monitor;
     private readonly IJournalStore _journal;
@@ -16,6 +24,7 @@ public sealed class SessionEngine
     private readonly ISessionHistoryStore _historyStore;
     private readonly IAlertNotifier _alerts;
     private readonly INetworkFailoverController _networkFailover;
+    private readonly IRecoveryHook _recoveryHook;
     private readonly TimeSpan _watchGracePeriod;
 
     private JournalEntry? _activeJournal;
@@ -24,6 +33,8 @@ public sealed class SessionEngine
     private int? _startBatteryPercent;
     private DateTimeOffset? _watchMissingSinceUtc;
     private string? _activeProfileName;
+    private ProfileBaseline? _profileBaseline;
+    private IReadOnlyList<SessionHistoryRecord>? _historyCache;
     private bool _wifiFailoverTriggered;
     private int _consecutiveOfflineTicks;
     private DateTimeOffset? _lastWifiFailoverAttemptUtc;
@@ -45,7 +56,8 @@ public sealed class SessionEngine
         ISessionHistoryStore? historyStore = null,
         TimeSpan? watchGracePeriod = null,
         IAlertNotifier? alertNotifier = null,
-        INetworkFailoverController? networkFailover = null)
+        INetworkFailoverController? networkFailover = null,
+        IRecoveryHook? recoveryHook = null)
     {
         _power = power;
         _monitor = monitor;
@@ -57,19 +69,33 @@ public sealed class SessionEngine
         _historyStore = historyStore ?? new NoOpSessionHistoryStore();
         _alerts = alertNotifier ?? new NoOpAlertNotifier();
         _networkFailover = networkFailover ?? new NoOpNetworkFailoverController();
+        _recoveryHook = recoveryHook ?? new NoOpRecoveryHook();
         _watchGracePeriod = watchGracePeriod ?? TimeSpan.FromSeconds(15);
         Config = _configStore.Load();
     }
 
-    public IReadOnlyList<SessionHistoryRecord> GetRecentHistory() => _historyStore.Load();
+    public IReadOnlyList<SessionHistoryRecord> GetRecentHistory() =>
+        _historyCache ??= _historyStore.Load();
 
     public IReadOnlyList<RunningAppInfo> ListRunningSessionApps() => _watcher.ListRunningSessionApps();
+
+    public bool IsProcessCurrentlyRunning(string processName, int? pid = null)
+    {
+        var normalized = ProcessFocusPolicy.NormalizeProcessName(processName);
+        if (string.IsNullOrEmpty(normalized))
+        {
+            return false;
+        }
+
+        return _watcher.IsProcessRunning(new ProcessWatchTarget(normalized, pid));
+    }
 
     public bool RecoverIfNeeded()
     {
         var stale = _journal.Load();
         if (stale is null)
         {
+            _recoveryHook.SetRecoveryArmed(false);
             return false;
         }
 
@@ -82,7 +108,7 @@ public sealed class SessionEngine
 
         if (stale.LowPowerEngagedByApp)
         {
-            _power.TrySetPowerSaver(false);
+            _power.TrySetPowerSaver(false, stale.OriginalEnergySaverThreshold);
         }
 
         if (stale.SuspendedProcesses is { Count: > 0 })
@@ -94,6 +120,7 @@ public sealed class SessionEngine
         _activeFocus = FocusReport.Empty;
 
         _journal.Clear();
+        _recoveryHook.SetRecoveryArmed(false);
         _lastStopReason = StopReason.CrashRecovery;
         NotifyChanged();
         return true;
@@ -110,22 +137,29 @@ public sealed class SessionEngine
             return null;
         }
 
-        Config.ClamshellEnabled = profile.ClamshellEnabled;
-        Config.AgentFocusEnabled = profile.AgentFocusEnabled;
-        Config.FocusSelectedAppMode = profile.SelectedAppMode;
-        Config.FocusCloseSelectedApps = profile.SelectedAppMode == SelectedAppMode.GracefulClose;
-        Config.KeepDisplayAwake = profile.KeepDisplayAwake;
-        Config.AutoSleepOnCompletion = profile.AutoSleepOnCompletion;
-        _configStore.Save(Config);
-
         if (startImmediately)
         {
+            var baseline = _profileBaseline ?? CaptureBaseline(Config);
+            if (_activeJournal is not null)
+            {
+                StopInternal(StopReason.Manual, allowSleep: false);
+            }
+
+            _profileBaseline = baseline;
+            ApplyProfileFields(Config, profile);
+
             var mins = overrideDurationMinutes is > 0
                 ? overrideDurationMinutes.Value
                 : profile.DurationMinutes;
             StartInternal(TimeSpan.FromMinutes(mins), profile.ClamshellEnabled, watchTarget: null, profileName: profile.Name);
+            return profile;
         }
-        else if (_activeJournal is not null)
+
+        _profileBaseline = null;
+        ApplyProfileFields(Config, profile);
+        _configStore.Save(Config);
+
+        if (_activeJournal is not null)
         {
             _activeProfileName = profile.Name;
             _power.EnableAwakeAssertion(Config.KeepDisplayAwake);
@@ -137,6 +171,25 @@ public sealed class SessionEngine
         }
 
         return profile;
+    }
+
+    private static ProfileBaseline CaptureBaseline(AppConfig cfg) =>
+        new(
+            cfg.ClamshellEnabled,
+            cfg.AgentFocusEnabled,
+            cfg.FocusSelectedAppMode,
+            cfg.FocusCloseSelectedApps,
+            cfg.KeepDisplayAwake,
+            cfg.AutoSleepOnCompletion);
+
+    private static void ApplyProfileFields(AppConfig cfg, SessionProfile profile)
+    {
+        cfg.ClamshellEnabled = profile.ClamshellEnabled;
+        cfg.AgentFocusEnabled = profile.AgentFocusEnabled;
+        cfg.FocusSelectedAppMode = profile.SelectedAppMode;
+        cfg.FocusCloseSelectedApps = profile.SelectedAppMode == SelectedAppMode.GracefulClose;
+        cfg.KeepDisplayAwake = profile.KeepDisplayAwake;
+        cfg.AutoSleepOnCompletion = profile.AutoSleepOnCompletion;
     }
 
     public void StartWatchingProcess(
@@ -208,6 +261,11 @@ public sealed class SessionEngine
         _activeProfileName = profileName;
         _wifiFailoverTriggered = false;
         _consecutiveOfflineTicks = 0;
+
+        if (clamshell || Config.AgentFocusEnabled)
+        {
+            _recoveryHook.SetRecoveryArmed(true);
+        }
 
         if (clamshell && lidBackup is not null)
         {
@@ -361,9 +419,10 @@ public sealed class SessionEngine
                 localNow,
                 isSessionActive: false,
                 isOnAcPower: LatestSnapshot.IsOnAcPower,
-                _lastNightShiftDate))
+                _lastNightShiftDate,
+                out var triggerDate))
             {
-                _lastNightShiftDate = DateOnly.FromDateTime(localNow.DateTime);
+                _lastNightShiftDate = triggerDate;
                 ApplyProfile(
                     Config.NightShiftProfileName,
                     startImmediately: true,
@@ -422,6 +481,11 @@ public sealed class SessionEngine
 
     public void Stop(StopReason reason = StopReason.Manual)
     {
+        if (reason == StopReason.AppExiting && _activeJournal is null)
+        {
+            return;
+        }
+
         StopInternal(reason, allowSleep: false);
     }
 
@@ -528,9 +592,14 @@ public sealed class SessionEngine
             return;
         }
 
+        var originalThreshold = _power.ReadEnergySaverThreshold();
         if (_power.TrySetPowerSaver(true))
         {
-            _activeJournal = _activeJournal with { LowPowerEngagedByApp = true };
+            _activeJournal = _activeJournal with
+            {
+                LowPowerEngagedByApp = true,
+                OriginalEnergySaverThreshold = originalThreshold
+            };
             _journal.Save(_activeJournal);
             TrySendAlert(
                 "LowPowerEngaged",
@@ -566,7 +635,7 @@ public sealed class SessionEngine
                 ? LatestSnapshot.BatteryPercent
                 : (int?)null;
 
-            _historyStore.Append(new SessionHistoryRecord(
+            var record = new SessionHistoryRecord(
                 StartedAtUtc: current.StartedAtUtc,
                 EndedAtUtc: endedAt,
                 ActualDuration: actual,
@@ -575,7 +644,22 @@ public sealed class SessionEngine
                 StartBatteryPercent: startBattery,
                 EndBatteryPercent: endBattery,
                 ReclaimedRamBytes: focusSnapshot.ReclaimedRamBytes,
-                WatchedProcessName: current.WatchTarget?.ProcessName));
+                WatchedProcessName: current.WatchTarget?.ProcessName);
+
+            _historyStore.Append(record);
+            if (_historyCache is not null)
+            {
+                var updated = new List<SessionHistoryRecord>(10) { record };
+                foreach (var item in _historyCache)
+                {
+                    if (updated.Count >= 10)
+                    {
+                        break;
+                    }
+                    updated.Add(item);
+                }
+                _historyCache = updated;
+            }
 
             if (reason is StopReason.BatteryCritical or StopReason.ThermalCritical)
             {
@@ -585,7 +669,8 @@ public sealed class SessionEngine
                     $"Session stopped early ({reason}); system entering sleep.",
                     isGuardAlert: true,
                     LatestSnapshot,
-                    focusSnapshot.ReclaimedRamBytes);
+                    focusSnapshot.ReclaimedRamBytes,
+                    waitForDelivery: allowSleep);
             }
             else if (reason is StopReason.TimerExpired or StopReason.WatchedProcessExited)
             {
@@ -598,7 +683,8 @@ public sealed class SessionEngine
                     summary,
                     isGuardAlert: false,
                     LatestSnapshot,
-                    focusSnapshot.ReclaimedRamBytes);
+                    focusSnapshot.ReclaimedRamBytes,
+                    waitForDelivery: allowSleep);
             }
         }
 
@@ -611,13 +697,25 @@ public sealed class SessionEngine
 
         if (current?.LowPowerEngagedByApp == true)
         {
-            _power.TrySetPowerSaver(false);
+            _power.TrySetPowerSaver(false, current.OriginalEnergySaverThreshold);
         }
 
         _focus.Restore();
         _activeFocus = FocusReport.Empty;
 
+        if (_profileBaseline is { } baseline)
+        {
+            Config.ClamshellEnabled = baseline.ClamshellEnabled;
+            Config.AgentFocusEnabled = baseline.AgentFocusEnabled;
+            Config.FocusSelectedAppMode = baseline.FocusSelectedAppMode;
+            Config.FocusCloseSelectedApps = baseline.FocusCloseSelectedApps;
+            Config.KeepDisplayAwake = baseline.KeepDisplayAwake;
+            Config.AutoSleepOnCompletion = baseline.AutoSleepOnCompletion;
+            _profileBaseline = null;
+        }
+
         _journal.Clear();
+        _recoveryHook.SetRecoveryArmed(false);
         NotifyChanged();
 
         if (allowSleep)
@@ -632,7 +730,8 @@ public sealed class SessionEngine
         string message,
         bool isGuardAlert,
         SystemPowerSnapshot? snap,
-        long reclaimedBytes)
+        long reclaimedBytes,
+        bool waitForDelivery = false)
     {
         if (!Config.AlertsEnabled
             || !WebhookPolicy.IsValidWebhookUrl(Config.AlertWebhookUrl))
@@ -652,7 +751,10 @@ public sealed class SessionEngine
 
         var mb = Math.Round(reclaimedBytes / (1024.0 * 1024.0), 1);
         var batt = snap?.HasBattery == true ? snap.BatteryPercent : (int?)null;
-        _alerts.Notify(Config, new WebhookAlertEvent(eventType, title, message, _clock.UtcNow, batt, mb));
+        _alerts.Notify(
+            Config,
+            new WebhookAlertEvent(eventType, title, message, _clock.UtcNow, batt, mb),
+            waitForDelivery);
     }
 
     private void NotifyChanged() => StatusChanged?.Invoke(GetStatus());

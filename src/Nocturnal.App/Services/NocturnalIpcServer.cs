@@ -10,6 +10,7 @@ namespace Nocturnal.App.Services;
 public sealed class NocturnalIpcServer : IDisposable
 {
     private const int MaxRequestBytes = 4096;
+    private static readonly TimeSpan ClientIoTimeout = TimeSpan.FromSeconds(3);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -17,13 +18,16 @@ public sealed class NocturnalIpcServer : IDisposable
 
     private readonly SessionEngine _engine;
     private readonly Dispatcher _dispatcher;
+    private readonly Action? _onConfigMutated;
+    private readonly SemaphoreSlim _clientGate = new(4, 4);
     private readonly CancellationTokenSource _cts = new();
     private Task? _loopTask;
 
-    public NocturnalIpcServer(SessionEngine engine, Dispatcher dispatcher)
+    public NocturnalIpcServer(SessionEngine engine, Dispatcher dispatcher, Action? onConfigMutated = null)
     {
         _engine = engine;
         _dispatcher = dispatcher;
+        _onConfigMutated = onConfigMutated;
     }
 
     public void Start()
@@ -39,9 +43,14 @@ public sealed class NocturnalIpcServer : IDisposable
     {
         while (!ct.IsCancellationRequested)
         {
+            NamedPipeServerStream? server = null;
+            var enteredGate = false;
             try
             {
-                await using var server = new NamedPipeServerStream(
+                await _clientGate.WaitAsync(ct).ConfigureAwait(false);
+                enteredGate = true;
+
+                server = new NamedPipeServerStream(
                     IpcProtocol.PipeName,
                     PipeDirection.InOut,
                     maxNumberOfServerInstances: 4,
@@ -49,14 +58,35 @@ public sealed class NocturnalIpcServer : IDisposable
                     PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
 
                 await server.WaitForConnectionAsync(ct).ConfigureAwait(false);
-                await HandleClientAsync(server, ct).ConfigureAwait(false);
+                var connectedPipe = server;
+                server = null;
+                enteredGate = false;
+
+                _ = Task.Run(() => HandleClientAndDisposeAsync(connectedPipe, ct));
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
+                if (server is not null)
+                {
+                    await server.DisposeAsync().ConfigureAwait(false);
+                }
+                if (enteredGate)
+                {
+                    _clientGate.Release();
+                }
                 break;
             }
             catch
             {
+                if (server is not null)
+                {
+                    await server.DisposeAsync().ConfigureAwait(false);
+                }
+                if (enteredGate)
+                {
+                    _clientGate.Release();
+                }
+
                 // Transient pipe error; back off briefly so loop never spins hot.
                 try
                 {
@@ -66,6 +96,36 @@ public sealed class NocturnalIpcServer : IDisposable
                 {
                     break;
                 }
+            }
+        }
+    }
+
+    private async Task HandleClientAndDisposeAsync(NamedPipeServerStream pipe, CancellationToken ct)
+    {
+        try
+        {
+            using var ioCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            ioCts.CancelAfter(ClientIoTimeout);
+            await HandleClientAsync(pipe, ioCts.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            try
+            {
+                await pipe.DisposeAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Ignore dispose errors on disconnected pipe.
+            }
+
+            try
+            {
+                _clientGate.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Server is shutting down.
             }
         }
     }
@@ -166,6 +226,7 @@ public sealed class NocturnalIpcServer : IDisposable
 
                 ApplyOptionalFlags(req);
                 _engine.Start(TimeSpan.FromSeconds(req.DurationSeconds.Value), req.Clamshell);
+                _onConfigMutated?.Invoke();
                 var status = BuildStatusPayload();
                 return new IpcResponse(true, $"Awake for {FormatDuration(TimeSpan.FromSeconds(status.RemainingSeconds))}.", status);
             }
@@ -183,6 +244,7 @@ public sealed class NocturnalIpcServer : IDisposable
                     : null;
 
                 _engine.StartWatchingProcess(req.WatchProcess, req.WatchPid, maxDur, req.Clamshell);
+                _onConfigMutated?.Invoke();
                 var status = BuildStatusPayload();
                 return new IpcResponse(true, $"Watching process '{status.WatchProcess}'.", status);
             }
@@ -200,6 +262,7 @@ public sealed class NocturnalIpcServer : IDisposable
                     return new IpcResponse(false, $"Unknown profile '{req.ProfileName}'.");
                 }
 
+                _onConfigMutated?.Invoke();
                 var status = BuildStatusPayload();
                 return new IpcResponse(true, $"Profile '{applied.Name}' started ({applied.DurationMinutes}m).", status);
             }
