@@ -195,6 +195,9 @@ public partial class MainPopupWindow : Window
         ModeOffRadio.IsChecked = effectiveMode == SelectedAppMode.Off;
         ModePauseRadio.IsChecked = effectiveMode == SelectedAppMode.DeepPause;
         ModeCloseRadio.IsChecked = effectiveMode == SelectedAppMode.GracefulClose;
+        ScopeAllNonAiRadio.IsChecked = cfg.FocusApplyToAllNonAiApps;
+        ScopeSelectedRadio.IsChecked = !cfg.FocusApplyToAllNonAiApps;
+        SelectedAppsCard.Visibility = cfg.FocusApplyToAllNonAiApps ? Visibility.Collapsed : Visibility.Visible;
         FocusLidOnlySwitch.IsChecked = cfg.FocusPauseOnlyWhenLidClosed;
 
         AutoSleepSwitch.IsChecked = cfg.AutoSleepOnCompletion;
@@ -304,15 +307,27 @@ public partial class MainPopupWindow : Window
     {
         if (!status.IsActive || !status.Focus.IsEngaged)
         {
-            return _engine.Config.AgentFocusEnabled
-                ? (_engine.Config.FocusPauseOnlyWhenLidClosed ? "Armed: pauses selected on lid close" : "Ready on session start")
-                : "Throttle non-agent apps";
+            if (!_engine.Config.AgentFocusEnabled)
+            {
+                return "Throttle non-agent apps";
+            }
+
+            if (_engine.Config.FocusPauseOnlyWhenLidClosed)
+            {
+                return _engine.Config.FocusApplyToAllNonAiApps
+                    ? "Armed: pauses all non-AI apps on lid close"
+                    : "Armed: pauses selected apps on lid close";
+            }
+
+            return "Ready on session start";
         }
 
         var parts = new List<string> { $"{status.Focus.ThrottledProcessCount} throttled" };
         if (status.FocusArmedForLidClose)
         {
-            parts.Add("armed for lid close");
+            parts.Add(_engine.Config.FocusApplyToAllNonAiApps
+                ? "armed (all non-AI on lid close)"
+                : "armed (selected on lid close)");
         }
         else if (status.Focus.PausedProcessCount > 0)
         {
@@ -336,7 +351,7 @@ public partial class MainPopupWindow : Window
         {
             var mb = Math.Round(status.Focus.ReclaimedRamBytes / (1024.0 * 1024.0), 1);
             var pausePart = status.FocusArmedForLidClose
-                ? "armed for lid close"
+                ? (_engine.Config.FocusApplyToAllNonAiApps ? "all non-AI armed for lid close" : "selected armed for lid close")
                 : $"{status.Focus.PausedProcessCount} paused";
             FocusTelemetryText.Text = $"Trimmed ~{mb} MB working set • {pausePart} • {status.Focus.ThrottledProcessCount} EcoQoS";
             FocusTelemetryBorder.Visibility = Visibility.Visible;
@@ -436,6 +451,9 @@ public partial class MainPopupWindow : Window
         ModeOffRadio.IsChecked = effectiveMode == SelectedAppMode.Off;
         ModePauseRadio.IsChecked = effectiveMode == SelectedAppMode.DeepPause;
         ModeCloseRadio.IsChecked = effectiveMode == SelectedAppMode.GracefulClose;
+        ScopeAllNonAiRadio.IsChecked = cfg.FocusApplyToAllNonAiApps;
+        ScopeSelectedRadio.IsChecked = !cfg.FocusApplyToAllNonAiApps;
+        SelectedAppsCard.Visibility = cfg.FocusApplyToAllNonAiApps ? Visibility.Collapsed : Visibility.Visible;
         FocusLidOnlySwitch.IsChecked = cfg.FocusPauseOnlyWhenLidClosed;
 
         AutoSleepSwitch.IsChecked = cfg.AutoSleepOnCompletion;
@@ -754,6 +772,19 @@ public partial class MainPopupWindow : Window
     private void FocusLidOnlySwitch_Click(object sender, RoutedEventArgs e)
     {
         _engine.UpdateConfig(c => c.FocusPauseOnlyWhenLidClosed = FocusLidOnlySwitch.IsChecked == true);
+        _engine.ReapplyAgentFocusIfActive();
+    }
+
+    private void FocusScopeRadio_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing || sender is not System.Windows.Controls.RadioButton radio || radio.Tag is not string tag)
+        {
+            return;
+        }
+
+        var applyAll = string.Equals(tag, "All", StringComparison.OrdinalIgnoreCase);
+        SelectedAppsCard.Visibility = applyAll ? Visibility.Collapsed : Visibility.Visible;
+        _engine.UpdateConfig(c => c.FocusApplyToAllNonAiApps = applyAll);
         _engine.ReapplyAgentFocusIfActive();
     }
 

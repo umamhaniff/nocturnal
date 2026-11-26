@@ -151,9 +151,10 @@ public sealed class AppConfig
     public bool AgentFocusEnabled { get; set; } = false;
     public bool FocusEcoQosEnabled { get; set; } = true;
     public bool FocusRamTrimEnabled { get; set; } = true;
-    public SelectedAppMode FocusSelectedAppMode { get; set; } = SelectedAppMode.Off;
+    public SelectedAppMode FocusSelectedAppMode { get; set; } = SelectedAppMode.DeepPause;
     public bool FocusCloseSelectedApps { get; set; } = false;
     public bool FocusPauseOnlyWhenLidClosed { get; set; } = true;
+    public bool FocusApplyToAllNonAiApps { get; set; } = true;
     public List<string> FocusAppsToClose { get; set; } = ["Discord", "Spotify", "Steam"];
     public List<string> CustomAppsToManage { get; set; } = [];
     public List<string> CustomAgentWhitelist { get; set; } = [];

@@ -737,6 +737,7 @@ public sealed class SessionEngine
             FocusSelectedAppMode = effectiveMode,
             FocusCloseSelectedApps = effectiveMode == SelectedAppMode.GracefulClose,
             FocusPauseOnlyWhenLidClosed = Config.FocusPauseOnlyWhenLidClosed,
+            FocusApplyToAllNonAiApps = Config.FocusApplyToAllNonAiApps,
             FocusAppsToClose = Config.FocusAppsToClose.ToList(),
             CustomAppsToManage = Config.CustomAppsToManage.ToList(),
             CustomAgentWhitelist = Config.CustomAgentWhitelist.ToList()

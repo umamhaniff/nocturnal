@@ -75,7 +75,7 @@ public partial class App : System.Windows.Application
 
         _logger = new AppLogger();
         _alertNotifier = new HttpAlertNotifier();
-        _lidMonitor = new WindowsLidMonitor();
+        _lidMonitor = new WindowsLidMonitor(_logger);
 
         _engine = new SessionEngine(
             new Win32PowerController(),
@@ -91,6 +91,7 @@ public partial class App : System.Windows.Application
             presenceMonitor: new WindowsUserPresenceMonitor(),
             logger: _logger);
 
+        _engine.OnLidStateChanged(_lidMonitor.IsLidClosed);
         _lidMonitor.LidStateChanged += isClosed =>
             Dispatcher.BeginInvoke(() => _engine?.OnLidStateChanged(isClosed));
 

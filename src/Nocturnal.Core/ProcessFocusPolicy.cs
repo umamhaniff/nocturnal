@@ -33,6 +33,13 @@ public static class ProcessFocusPolicy
         "Taskmgr",
         "ctfmon",
         "SecurityHealthService",
+        "SecurityHealthSystray",
+        "ApplicationFrameHost",
+        "DllHost",
+        "ShellHost",
+        "LockApp",
+        "RtkAudUService64",
+        "igfxEM",
         "MsMpEng",
         "audiodg",
         "Nocturnal",
@@ -278,6 +285,13 @@ public static class ProcessFocusPolicy
 
         if (mode != SelectedAppMode.Off)
         {
+            if (config.FocusApplyToAllNonAiApps)
+            {
+                return mode == SelectedAppMode.DeepPause
+                    ? ProcessAction.DeepPause
+                    : ProcessAction.GracefulClose;
+            }
+
             if (targets.Contains(norm))
             {
                 return mode == SelectedAppMode.DeepPause

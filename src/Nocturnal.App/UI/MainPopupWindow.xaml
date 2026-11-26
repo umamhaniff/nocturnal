@@ -937,13 +937,20 @@
                         <Border Height="1" Background="#1E2430" Margin="0,0,0,10" />
 
                         <StackPanel>
-                            <TextBlock Text="Selected Apps Action" FontSize="12.5" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                            <TextBlock Text="Non-AI Apps Rule" FontSize="12.5" FontWeight="SemiBold" Foreground="#F1F5F9" />
                             <TextBlock Text="Pause freezes &amp; auto-resumes; Close sends graceful close" FontSize="11" Foreground="#8A99B0" Margin="0,1,0,8" />
                             <Border Background="#0E121A" BorderBrush="#222936" BorderThickness="1" CornerRadius="9" Padding="3">
                                 <UniformGrid Columns="3">
                                     <RadioButton x:Name="ModeOffRadio" Content="Off" Tag="Off" GroupName="SelectedAppModeGroup" Style="{StaticResource SegmentTabStyle}" Checked="SelectedAppModeRadio_Checked" />
                                     <RadioButton x:Name="ModePauseRadio" Content="Pause" Tag="DeepPause" GroupName="SelectedAppModeGroup" Style="{StaticResource SegmentTabStyle}" Checked="SelectedAppModeRadio_Checked" />
                                     <RadioButton x:Name="ModeCloseRadio" Content="Close" Tag="GracefulClose" GroupName="SelectedAppModeGroup" Style="{StaticResource SegmentTabStyle}" Checked="SelectedAppModeRadio_Checked" />
+                                </UniformGrid>
+                            </Border>
+
+                            <Border Background="#0E121A" BorderBrush="#222936" BorderThickness="1" CornerRadius="9" Padding="3" Margin="0,8,0,0">
+                                <UniformGrid Columns="2">
+                                    <RadioButton x:Name="ScopeAllNonAiRadio" Content="All Non-AI" Tag="All" GroupName="FocusScopeGroup" Style="{StaticResource SegmentTabStyle}" Checked="FocusScopeRadio_Checked" />
+                                    <RadioButton x:Name="ScopeSelectedRadio" Content="Selected Only" Tag="Selected" GroupName="FocusScopeGroup" Style="{StaticResource SegmentTabStyle}" Checked="FocusScopeRadio_Checked" />
                                 </UniformGrid>
                             </Border>
 
@@ -965,7 +972,8 @@
                     </StackPanel>
                 </Border>
 
-                <Border Background="#151922"
+                <Border x:Name="SelectedAppsCard"
+                        Background="#151922"
                         BorderBrush="#222936"
                         BorderThickness="1"
                         CornerRadius="12"
@@ -1343,7 +1351,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
-                                <TextBlock x:Name="VersionText" Text="Nocturnal v1.3.2" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                                <TextBlock x:Name="VersionText" Text="Nocturnal v1.3.3" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
                                 <TextBlock x:Name="UpdateStatusText" Text="Check GitHub Releases" FontSize="10.5" Foreground="#8A99B0" />
                             </StackPanel>
                             <Button x:Name="CheckUpdateBtn"

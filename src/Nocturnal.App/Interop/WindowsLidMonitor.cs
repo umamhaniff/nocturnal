@@ -9,9 +9,10 @@ public sealed class WindowsLidMonitor : NativeWindow, IDisposable
     private const int WmPowerBroadcast = 0x0218;
     private const int PbtPowerSettingChange = 0x8013;
     private const uint DeviceNotifyWindowHandle = 0;
-    private static readonly IntPtr HwndMessage = new(-3);
+    private const int WsExToolWindow = 0x00000080;
     private static readonly Guid GuidLidSwitchStateChange = new("BA3E0F4D-B817-4094-A2D1-D56379E6A0F3");
 
+    private readonly IAppLogger? _logger;
     private IntPtr _notificationHandle;
     private bool _disposed;
 
@@ -27,22 +28,31 @@ public sealed class WindowsLidMonitor : NativeWindow, IDisposable
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool UnregisterPowerSettingNotification(IntPtr handle);
 
-    public WindowsLidMonitor()
+    public WindowsLidMonitor(IAppLogger? logger = null)
     {
+        _logger = logger;
         try
         {
+            // Hidden tool top-level window (never HWND_MESSAGE) so Windows 11 delivers WM_POWERBROADCAST reliably.
             CreateHandle(new CreateParams
             {
-                Parent = HwndMessage,
-                Caption = "NocturnalLidMonitor"
+                Parent = IntPtr.Zero,
+                Caption = "NocturnalLidMonitor",
+                X = 0,
+                Y = 0,
+                Width = 0,
+                Height = 0,
+                Style = 0,
+                ExStyle = WsExToolWindow
             });
 
             var guid = GuidLidSwitchStateChange;
             _notificationHandle = RegisterPowerSettingNotification(Handle, ref guid, DeviceNotifyWindowHandle);
+            _logger?.Info($"WindowsLidMonitor registered power setting notification (registered={_notificationHandle != IntPtr.Zero}).");
         }
-        catch
+        catch (Exception ex)
         {
-            // Fallback gracefully on systems without lid switch hardware (e.g. desktops).
+            _logger?.Warn($"WindowsLidMonitor failed to register lid sensor: {ex.Message}");
         }
     }
 
@@ -62,6 +72,7 @@ public sealed class WindowsLidMonitor : NativeWindow, IDisposable
                         ? Marshal.ReadInt32(m.LParam, 20)
                         : Marshal.ReadByte(m.LParam, 20);
                     var closed = value == 0;
+                    _logger?.Info($"WM_POWERBROADCAST lid event received: {(closed ? "Closed" : "Opened")} (raw={value}).");
                     if (IsLidClosed != closed)
                     {
                         IsLidClosed = closed;

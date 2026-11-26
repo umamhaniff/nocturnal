@@ -67,6 +67,8 @@ internal static class Program
         Run("LidAwareFocus_ArmsWhileLidOpen_PausesOnLidClose_ResumesOnLidOpen", TestLidAwareFocusWorkflow);
         Run("AppConfig_Normalize_RepairsNullListsAndOutOfRangeValues", TestAppConfigNormalize);
         Run("NightShift_PersistsLastTriggeredDate_AcrossRestart", TestNightShiftPersistsAcrossRestart);
+        Run("FocusPolicy_AllNonAiApps_PausesUserBrowsersAndMedia_WhileProtectingAiAndSystem", TestFocusPolicyAllNonAiApps);
+        Run("LidAwareAllNonAi_ArmsWhileLidOpen_PausesAllNonAiOnLidClose_ResumesOnOpen", TestLidAwareAllNonAiWorkflow);
 
         Console.WriteLine($"\nResults: {_passed} passed, {_failed} failed.");
         return _failed == 0 ? 0 : 1;
@@ -258,6 +260,7 @@ internal static class Program
         {
             FocusEcoQosEnabled = true,
             FocusSelectedAppMode = SelectedAppMode.Off,
+            FocusApplyToAllNonAiApps = false,
             FocusAppsToClose = ["Discord", "Spotify"]
         };
 
@@ -342,7 +345,11 @@ internal static class Program
 
     private static void TestProtectedSystemPaths()
     {
-        var config = new AppConfig { FocusEcoQosEnabled = true };
+        var config = new AppConfig
+        {
+            FocusEcoQosEnabled = true,
+            FocusSelectedAppMode = SelectedAppMode.Off
+        };
         var nodes = new List<ProcessNode>
         {
             new(20, 4, "explorer", 1, @"C:\Windows\explorer.exe"),
@@ -1177,6 +1184,55 @@ internal static class Program
         engine2.Tick();
 
         Assert(!engine2.GetStatus().IsActive, "Restarted app must not re-trigger Night Shift on same calendar date");
+    }
+
+    private static void TestFocusPolicyAllNonAiApps()
+    {
+        var config = new AppConfig
+        {
+            FocusEcoQosEnabled = true,
+            FocusSelectedAppMode = SelectedAppMode.DeepPause,
+            FocusApplyToAllNonAiApps = true
+        };
+
+        var nodes = new List<ProcessNode>
+        {
+            new(20, 4, "explorer", 1, @"C:\Windows\explorer.exe"),
+            new(100, 20, "chrome", 1, @"C:\Program Files\Google\Chrome\chrome.exe"),
+            new(101, 20, "Everything", 1, @"C:\Program Files\Everything\Everything.exe"),
+            new(102, 20, "spotify", 1, @"C:\Users\dev\Spotify.exe"),
+            new(200, 20, "claude", 1, @"C:\Users\dev\claude.exe"),
+            new(201, 200, "chrome", 1, @"C:\Program Files\Google\Chrome\chrome.exe"),
+            new(202, 20, "SecurityHealthSystray", 1, @"C:\Windows\System32\SecurityHealthSystray.exe")
+        };
+
+        var actions = ProcessFocusPolicy.EvaluateTree(nodes, 1, 999, config);
+        Assert(actions[100] == ProcessAction.DeepPause, "AllNonAiApps must DeepPause user Chrome/YouTube even if unselected");
+        Assert(actions[101] == ProcessAction.DeepPause, "AllNonAiApps must DeepPause unselected background user app");
+        Assert(actions[102] == ProcessAction.DeepPause, "AllNonAiApps must DeepPause unselected Spotify");
+        Assert(actions[200] == ProcessAction.Protect, "AI agent root must stay protected");
+        Assert(actions[201] == ProcessAction.Protect, "Agent child Playwright browser must stay protected");
+        Assert(actions[202] == ProcessAction.Protect, "Windows system tray helper must stay protected");
+    }
+
+    private static void TestLidAwareAllNonAiWorkflow()
+    {
+        var (engine, _, _, _, _, focus, _, _) = CreateFullHarness();
+        // Default AppConfig already has FocusSelectedAppMode=DeepPause, FocusPauseOnlyWhenLidClosed=true, FocusApplyToAllNonAiApps=true.
+        engine.UpdateConfig(c => c.AgentFocusEnabled = true);
+
+        engine.Start(TimeSpan.FromMinutes(30));
+        var openStatus = engine.GetStatus();
+        Assert(openStatus.FocusArmedForLidClose, "While lid is open, All Non-AI DeepPause should stay armed");
+        Assert(focus.LastEngagedMode == SelectedAppMode.Off, "While lid is open, browsers/music keep playing");
+
+        engine.OnLidStateChanged(true);
+        Assert(!engine.GetStatus().FocusArmedForLidClose, "Closing lid activates All Non-AI DeepPause");
+        Assert(focus.LastEngagedMode == SelectedAppMode.DeepPause, "Closing lid engages DeepPause for all non-AI apps");
+
+        engine.OnLidStateChanged(false);
+        Assert(engine.GetStatus().FocusArmedForLidClose, "Opening lid re-arms and resumes all paused non-AI apps");
+        Assert(focus.LastEngagedMode == SelectedAppMode.Off, "Opening lid turns off DeepPause immediately");
     }
 
     private sealed class FakePowerController(List<string> callLog) : IPowerController

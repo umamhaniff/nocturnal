@@ -84,8 +84,8 @@ Built for laptops running AI coding assistants, local LLMs, CI/build jobs, or sc
 - Moves non-agent Session 1 applications into Windows 11 Efficiency Mode (`ProcessPowerThrottling`) and trims working set memory (`K32EmptyWorkingSet`) to move idle pages to standby without closing windows or losing state.
 
 ### 3. Lid-Aware Deep Pause (Auto-Resume) or Graceful Close
-- Choose `Off`, `Pause`, or `Close` for selected background apps (`Discord`, `Spotify`, `Steam`, `WhatsApp`, `Telegram`, `Teams`, `Slack`, user-only `Browsers`, or custom `Extra Apps`).
-- **Pause / Close Only When Lid Closes (Default ON):** Keeps music/browsers running normally while your laptop screen is open, automatically freezing or closing selected apps when you close the lid (`GUID_LIDSWITCH_STATE_CHANGE`) and resuming everything as soon as you lift it.
+- Choose `Off`, `Pause`, or `Close` with scope **`All Non-AI`** (default) or **`Selected Only`** (`Discord`, `Spotify`, `Steam`, `WhatsApp`, `Telegram`, `Teams`, `Slack`, user `Browsers`, or custom `Extra Apps`).
+- **Pause / Close Only When Lid Closes (Default ON):** Keeps browsers, YouTube, and music running normally while your laptop screen is open, automatically pausing/closing all non-AI apps when you close the lid (`GUID_LIDSWITCH_STATE_CHANGE`) and resuming everything as soon as you lift it.
 - **Deep Pause** journals each `(PID, StartTimeUtc)` **before** calling `NtSuspendProcess`, trims its working set, and resumes every verified child process cleanly when the session stops or recovers from a crash.
 
 ---
@@ -111,13 +111,13 @@ Start Session
 ## Installation
 
 ### Option 1: Windows Installer (Recommended — No .NET Runtime Required)
-1. Download the latest `Nocturnal-Setup-1.3.2.exe` from [**GitHub Releases**](https://github.com/umamhaniff/nocturnal/releases/latest).
+1. Download the latest `Nocturnal-Setup-1.3.3.exe` from [**GitHub Releases**](https://github.com/umamhaniff/nocturnal/releases/latest).
 2. Run the installer—installs per-user by default (no administrator prompt required), registers a Start Menu shortcut, adds `nocturnal-cli` to your user `PATH`, optional startup autostart, and a clean uninstaller.
 
 Silent per-user installation / upgrade:
 
 ```powershell
-.\Nocturnal-Setup-1.3.2.exe /VERYSILENT /CURRENTUSER
+.\Nocturnal-Setup-1.3.3.exe /VERYSILENT /CURRENTUSER
 ```
 
 ### Terminal & AI Agent CLI (`nocturnal-cli`)
@@ -151,7 +151,7 @@ dotnet run --project tests/Nocturnal.Tests
 # Run from source
 dotnet run --project src/Nocturnal.App
 
-# Build self-contained win-x64 installer -> dist\Nocturnal-Setup-1.3.2.exe
+# Build self-contained win-x64 installer -> dist\Nocturnal-Setup-1.3.3.exe
 .\scripts\build-installer.ps1
 
 # Or publish framework-dependent single-file portable executable
