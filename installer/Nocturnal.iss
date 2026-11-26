@@ -1,5 +1,5 @@
 #define MyAppName "Nocturnal"
-#define MyAppVersion "1.1.1"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "Hans x Gravi"
 #define MyAppURL "https://github.com/umamhaniff/nocturnal"
 #define MyAppExeName "Nocturnal.exe"
@@ -35,6 +35,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "autostart"; Description: "Launch {#MyAppName} at Windows startup"; GroupDescription: "Additional options:"
+Name: "addtopath"; Description: "Add nocturnal-cli to user PATH"; GroupDescription: "Additional options:"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional options:"; Flags: unchecked
 
 [InstallDelete]
@@ -118,10 +119,76 @@ begin
   Result := WizardSilent and (ExpandConstant('{param:RELAUNCH|0}') = '1');
 end;
 
+procedure AddToUserPath(Dir: string);
+var
+  CurrentPath: string;
+begin
+  if not RegQueryStringValue(HKCU, 'Environment', 'Path', CurrentPath) then
+  begin
+    CurrentPath := '';
+  end;
+
+  if Pos(';' + Lowercase(Dir) + ';', ';' + Lowercase(CurrentPath) + ';') > 0 then
+  begin
+    Exit;
+  end;
+
+  if CurrentPath <> '' then
+  begin
+    if Copy(CurrentPath, Length(CurrentPath), 1) <> ';' then
+    begin
+      CurrentPath := CurrentPath + ';';
+    end;
+  end;
+
+  RegWriteExpandStringValue(HKCU, 'Environment', 'Path', CurrentPath + Dir);
+end;
+
+procedure RemoveFromUserPath(Dir: string);
+var
+  CurrentPath: string;
+  UpdatedPath: string;
+  P: Integer;
+begin
+  if not RegQueryStringValue(HKCU, 'Environment', 'Path', CurrentPath) then
+  begin
+    Exit;
+  end;
+
+  UpdatedPath := CurrentPath;
+  P := Pos(';' + Lowercase(Dir), Lowercase(UpdatedPath));
+  if P > 0 then
+  begin
+    Delete(UpdatedPath, P, Length(Dir) + 1);
+  end
+  else if Pos(Lowercase(Dir) + ';', Lowercase(UpdatedPath)) = 1 then
+  begin
+    Delete(UpdatedPath, 1, Length(Dir) + 1);
+  end
+  else if Lowercase(UpdatedPath) = Lowercase(Dir) then
+  begin
+    UpdatedPath := '';
+  end;
+
+  if UpdatedPath <> CurrentPath then
+  begin
+    RegWriteExpandStringValue(HKCU, 'Environment', 'Path', UpdatedPath);
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('addtopath') then
+  begin
+    AddToUserPath(ExpandConstant('{app}'));
+  end;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
   begin
     RegDeleteValue(HKCU, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', '{#MyAppName}');
+    RemoveFromUserPath(ExpandConstant('{app}'));
   end;
 end;

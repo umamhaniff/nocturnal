@@ -8,6 +8,7 @@ public interface IPowerController
     void ApplyClamshellMode(Guid schemeGuid);
     void RestoreClamshellMode(LidActionBackup backup);
     bool TrySetPowerSaver(bool enabled);
+    void TurnOffDisplay();
     void SleepSystem();
 }
 
@@ -42,12 +43,34 @@ public interface IAgentFocusController
     void RecoverSuspended(IReadOnlyList<SuspendedProcessRecord> records);
 }
 
+public interface IProcessWatcher
+{
+    bool IsProcessRunning(ProcessWatchTarget target);
+}
+
+public interface ISessionHistoryStore
+{
+    IReadOnlyList<SessionHistoryRecord> Load();
+    void Append(SessionHistoryRecord record, int maxEntries = 10);
+}
+
 public sealed class NoOpAgentFocusController : IAgentFocusController
 {
     public FocusReport Engage(AppConfig config) => FocusReport.Empty;
     public IReadOnlyList<SuspendedProcessRecord> GetSuspendedProcesses() => [];
     public void Restore() { }
     public void RecoverSuspended(IReadOnlyList<SuspendedProcessRecord> records) { }
+}
+
+public sealed class NoOpProcessWatcher : IProcessWatcher
+{
+    public bool IsProcessRunning(ProcessWatchTarget target) => true;
+}
+
+public sealed class NoOpSessionHistoryStore : ISessionHistoryStore
+{
+    public IReadOnlyList<SessionHistoryRecord> Load() => [];
+    public void Append(SessionHistoryRecord record, int maxEntries = 10) { }
 }
 
 public sealed class SystemClock : IClock

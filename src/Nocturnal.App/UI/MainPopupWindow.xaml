@@ -337,6 +337,19 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="DisplayOffBtn"
+                            Style="{StaticResource IconButtonStyle}"
+                            ToolTip="Turn display off (stay awake)"
+                            Margin="0,0,4,0"
+                            Click="DisplayOff_Click">
+                        <Path Data="M2,3 H12 V9.5 H2 Z M5,12 H9 M7,9.5 V12"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeThickness="1.4"
+                              StrokeStartLineCap="Round"
+                              StrokeEndLineCap="Round"
+                              Width="14"
+                              Height="14" />
+                    </Button>
                     <Button x:Name="CompactSettingsBtn"
                             Style="{StaticResource IconButtonStyle}"
                             ToolTip="Open Settings"
@@ -523,6 +536,37 @@
                     </Grid>
                 </Border>
 
+                <!-- Process Watcher ("Awake Until Done") -->
+                <Border x:Name="WatchProcessPanel"
+                        Background="#151922"
+                        BorderBrush="#222936"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Padding="10"
+                        Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="Awake until process exits (e.g. python, dotnet)"
+                                   FontSize="10.5"
+                                   Foreground="#64748B"
+                                   Margin="2,0,0,5" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="WatchProcessBox"
+                                     Style="{StaticResource DarkInputStyle}"
+                                     KeyDown="WatchProcessBox_KeyDown"
+                                     Margin="0,0,8,0" />
+                            <Button Grid.Column="1"
+                                    Content="Watch"
+                                    Padding="12,5"
+                                    Style="{StaticResource PresetButtonStyle}"
+                                    Click="WatchProcess_Click" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
                 <!-- Quick Toggles Card -->
                 <Border Background="#151922"
                         BorderBrush="#222936"
@@ -565,11 +609,18 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Telemetry + Stop Button -->
+                <!-- Telemetry + History + Stop Button -->
                 <TextBlock x:Name="TelemetryText"
                            Text="AC • 100%"
                            FontSize="11"
                            Foreground="#64748B"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,2" />
+
+                <TextBlock x:Name="LastSessionText"
+                           Text="No recent sessions"
+                           FontSize="10.5"
+                           Foreground="#475569"
                            HorizontalAlignment="Center"
                            Margin="0,0,0,8" />
 
@@ -582,6 +633,22 @@
 
             <!-- TAB 2: AGENT FOCUS -->
             <StackPanel x:Name="FocusPanel" Visibility="Collapsed">
+                <Border x:Name="FocusTelemetryBorder"
+                        Background="#112A24"
+                        BorderBrush="#10B981"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Padding="10,7"
+                        Margin="0,0,0,10"
+                        Visibility="Collapsed">
+                    <TextBlock x:Name="FocusTelemetryText"
+                               Text="Reclaimed 0 MB RAM"
+                               FontSize="11.5"
+                               FontWeight="SemiBold"
+                               Foreground="#6EE7B7"
+                               HorizontalAlignment="Center" />
+                </Border>
+
                 <Border Background="#151922"
                         BorderBrush="#222936"
                         BorderThickness="1"
@@ -798,7 +865,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
-                                <TextBlock x:Name="VersionText" Text="Nocturnal v1.1.1" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                                <TextBlock x:Name="VersionText" Text="Nocturnal v1.2.0" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
                                 <TextBlock x:Name="UpdateStatusText" Text="Check GitHub Releases" FontSize="10.5" Foreground="#64748B" />
                             </StackPanel>
                             <Button x:Name="CheckUpdateBtn"

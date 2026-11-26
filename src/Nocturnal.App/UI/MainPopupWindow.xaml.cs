@@ -134,7 +134,9 @@ public partial class MainPopupWindow : Window
             HeaderStatusText.Foreground = ActiveHeaderTextBrush;
 
             StatusTitleText.Text = FormatRemaining(status.Remaining);
-            StatusSubText.Text = $"Ends {status.ExpiresAtUtc?.ToLocalTime():HH:mm}";
+            StatusSubText.Text = status.WatchTarget is { } watch
+                ? $"Watching: {watch.ProcessName} (max {status.ExpiresAtUtc?.ToLocalTime():HH:mm})"
+                : $"Ends {status.ExpiresAtUtc?.ToLocalTime():HH:mm}";
             UpdateRingArc(1.0 - status.Progress);
             StopButton.Visibility = Visibility.Visible;
         }
@@ -152,6 +154,7 @@ public partial class MainPopupWindow : Window
             StatusSubText.Text = status.LastStopReason switch
             {
                 StopReason.TimerExpired => "Session completed",
+                StopReason.WatchedProcessExited => "Watched process exited",
                 StopReason.BatteryCritical => "Battery critical stop",
                 StopReason.ThermalCritical => "Thermal critical stop",
                 StopReason.CrashRecovery => "Recovered power state",
@@ -162,6 +165,8 @@ public partial class MainPopupWindow : Window
         }
 
         FocusSummaryText.Text = BuildFocusSummary(status);
+        UpdateFocusTelemetryBanner(status);
+        UpdateHistorySummary();
 
         if (snapshot is not null)
         {
@@ -192,7 +197,65 @@ public partial class MainPopupWindow : Window
         {
             parts.Add($"{status.Focus.ClosedAppCount} closed");
         }
+        if (status.Focus.ReclaimedRamBytes > 0)
+        {
+            var mb = Math.Round(status.Focus.ReclaimedRamBytes / (1024.0 * 1024.0), 0);
+            parts.Add($"~{mb} MB RAM saved");
+        }
         return "Active: " + string.Join(", ", parts);
+    }
+
+    private void UpdateFocusTelemetryBanner(SessionStatus status)
+    {
+        if (status.IsActive && status.Focus.IsEngaged)
+        {
+            var mb = Math.Round(status.Focus.ReclaimedRamBytes / (1024.0 * 1024.0), 1);
+            FocusTelemetryText.Text = $"Reclaimed ~{mb} MB RAM • {status.Focus.PausedProcessCount} paused • {status.Focus.ThrottledProcessCount} EcoQoS";
+            FocusTelemetryBorder.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            FocusTelemetryBorder.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void UpdateHistorySummary()
+    {
+        var history = _engine.GetRecentHistory();
+        if (history.Count == 0)
+        {
+            LastSessionText.Text = "No recent sessions";
+            LastSessionText.ToolTip = null;
+            return;
+        }
+
+        var latest = history[0];
+        var mb = Math.Round(latest.ReclaimedRamBytes / (1024.0 * 1024.0), 0);
+        var durStr = latest.ActualDuration.TotalHours >= 1
+            ? $"{(int)latest.ActualDuration.TotalHours}h {latest.ActualDuration.Minutes}m"
+            : $"{Math.Max(1, (int)Math.Round(latest.ActualDuration.TotalMinutes))}m";
+        var reasonStr = latest.StopReason switch
+        {
+            StopReason.TimerExpired => "Completed",
+            StopReason.WatchedProcessExited => $"Watched {latest.WatchedProcessName ?? "process"}",
+            StopReason.BatteryCritical => "Battery critical",
+            StopReason.ThermalCritical => "Thermal critical",
+            StopReason.AppExiting => "App closed",
+            _ => "Stopped"
+        };
+        var ramPart = mb > 0 ? $" • ~{mb} MB trimmed" : "";
+        LastSessionText.Text = $"Last: {durStr} • {reasonStr}{ramPart}";
+
+        var tipLines = history.Take(5).Select(h =>
+        {
+            var d = h.ActualDuration.TotalHours >= 1
+                ? $"{(int)h.ActualDuration.TotalHours}h {h.ActualDuration.Minutes}m"
+                : $"{Math.Max(1, (int)Math.Round(h.ActualDuration.TotalMinutes))}m";
+            var rMb = Math.Round(h.ReclaimedRamBytes / (1024.0 * 1024.0), 1);
+            var w = string.IsNullOrWhiteSpace(h.WatchedProcessName) ? "" : $" [{h.WatchedProcessName}]";
+            return $"{h.EndedAtUtc.ToLocalTime():MM/dd HH:mm} — {d} ({h.StopReason}){w}, ~{rMb} MB";
+        });
+        LastSessionText.ToolTip = string.Join(Environment.NewLine, tipLines);
     }
 
     private void UpdateRingArc(double remainingFraction)
@@ -294,6 +357,8 @@ public partial class MainPopupWindow : Window
         var isCompact = style == TrayUiStyle.Compact;
         TabBarBorder.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
         CustomDurationPanel.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
+        WatchProcessPanel.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
+        LastSessionText.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
         CompactSettingsBtn.Visibility = isCompact ? Visibility.Visible : Visibility.Collapsed;
         CommunityFooterBorder.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
 
@@ -368,6 +433,43 @@ public partial class MainPopupWindow : Window
         {
             StatusSubText.Text = "Enter duration > 0";
         }
+    }
+
+    private void WatchProcess_Click(object sender, RoutedEventArgs e) => StartWatchFromInput();
+
+    private void WatchProcessBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            StartWatchFromInput();
+        }
+    }
+
+    private void StartWatchFromInput()
+    {
+        var raw = WatchProcessBox.Text;
+        var norm = ProcessFocusPolicy.NormalizeProcessName(raw);
+        if (string.IsNullOrEmpty(norm))
+        {
+            StatusSubText.Text = "Enter a process name";
+            return;
+        }
+
+        try
+        {
+            _engine.StartWatchingProcess(norm);
+        }
+        catch (ArgumentException)
+        {
+            StatusSubText.Text = "Enter a process name";
+        }
+    }
+
+    private async void DisplayOff_Click(object sender, RoutedEventArgs e)
+    {
+        Hide();
+        await Task.Delay(250);
+        _engine.TurnOffDisplay();
     }
 
     private void ClamshellSwitch_Click(object sender, RoutedEventArgs e) =>

@@ -118,6 +118,7 @@ public sealed class WindowsAgentFocusController : IAgentFocusController
             var affectedSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var affectedNames = new List<string>();
             var closedCount = 0;
+            long reclaimedRamBytes = 0;
 
             foreach (var node in nodes)
             {
@@ -139,7 +140,7 @@ public sealed class WindowsAgentFocusController : IAgentFocusController
                                 _suspended.Add(new SuspendedProcessRecord(proc.Id, startUtc));
                                 if (config.FocusRamTrimEnabled)
                                 {
-                                    TryEmptyWorkingSet(proc.Id);
+                                    reclaimedRamBytes += TryTrimAndMeasureReclaimed(proc);
                                 }
                                 if (affectedSet.Add(node.Name))
                                 {
@@ -170,7 +171,7 @@ public sealed class WindowsAgentFocusController : IAgentFocusController
                             }
                             if (config.FocusRamTrimEnabled)
                             {
-                                TryEmptyWorkingSet(proc.Id);
+                                reclaimedRamBytes += TryTrimAndMeasureReclaimed(proc);
                             }
                             if (ecoApplied || priorityLowered)
                             {
@@ -185,7 +186,7 @@ public sealed class WindowsAgentFocusController : IAgentFocusController
                 }
             }
 
-            return new FocusReport(true, _throttled.Count, _suspended.Count, closedCount, affectedNames);
+            return new FocusReport(true, _throttled.Count, _suspended.Count, closedCount, affectedNames, reclaimedRamBytes);
         }
         finally
         {
@@ -294,6 +295,26 @@ public sealed class WindowsAgentFocusController : IAgentFocusController
         finally
         {
             CloseHandle(handle);
+        }
+    }
+
+    private static long TryTrimAndMeasureReclaimed(Process proc)
+    {
+        try
+        {
+            var before = proc.WorkingSet64;
+            if (!TryEmptyWorkingSet(proc.Id))
+            {
+                return 0;
+            }
+
+            proc.Refresh();
+            var after = proc.WorkingSet64;
+            return before > after ? before - after : 0;
+        }
+        catch
+        {
+            return 0;
         }
     }
 

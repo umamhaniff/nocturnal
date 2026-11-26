@@ -1,8 +1,8 @@
 namespace Nocturnal.Core;
 
 /// <summary>
-/// Coordinates timed awake sessions, write-ahead crash recovery journaling,
-/// clamshell (lid-closed) state, and battery/thermal safety rules.
+/// Coordinates timed awake sessions, process-watch triggers, write-ahead crash recovery journaling,
+/// clamshell (lid-closed) state, session history, and battery/thermal safety rules.
 /// </summary>
 public sealed class SessionEngine
 {
@@ -12,10 +12,15 @@ public sealed class SessionEngine
     private readonly IConfigStore _configStore;
     private readonly IClock _clock;
     private readonly IAgentFocusController _focus;
+    private readonly IProcessWatcher _watcher;
+    private readonly ISessionHistoryStore _historyStore;
+    private readonly TimeSpan _watchGracePeriod;
 
     private JournalEntry? _activeJournal;
     private FocusReport _activeFocus = FocusReport.Empty;
     private StopReason _lastStopReason = StopReason.None;
+    private int? _startBatteryPercent;
+    private DateTimeOffset? _watchMissingSinceUtc;
 
     public AppConfig Config { get; private set; }
     public SystemPowerSnapshot? LatestSnapshot { get; private set; }
@@ -28,7 +33,10 @@ public sealed class SessionEngine
         IJournalStore journal,
         IConfigStore configStore,
         IClock? clock = null,
-        IAgentFocusController? focusController = null)
+        IAgentFocusController? focusController = null,
+        IProcessWatcher? processWatcher = null,
+        ISessionHistoryStore? historyStore = null,
+        TimeSpan? watchGracePeriod = null)
     {
         _power = power;
         _monitor = monitor;
@@ -36,8 +44,13 @@ public sealed class SessionEngine
         _configStore = configStore;
         _clock = clock ?? new SystemClock();
         _focus = focusController ?? new NoOpAgentFocusController();
+        _watcher = processWatcher ?? new NoOpProcessWatcher();
+        _historyStore = historyStore ?? new NoOpSessionHistoryStore();
+        _watchGracePeriod = watchGracePeriod ?? TimeSpan.FromSeconds(15);
         Config = _configStore.Load();
     }
+
+    public IReadOnlyList<SessionHistoryRecord> GetRecentHistory() => _historyStore.Load();
 
     public bool RecoverIfNeeded()
     {
@@ -73,7 +86,41 @@ public sealed class SessionEngine
         return true;
     }
 
-    public void Start(TimeSpan duration, bool? clamshellOverride = null)
+    public void Start(TimeSpan duration, bool? clamshellOverride = null) =>
+        StartInternal(duration, clamshellOverride, watchTarget: null);
+
+    public void StartWatchingProcess(
+        string processName,
+        int? pid = null,
+        TimeSpan? maxDuration = null,
+        bool? clamshellOverride = null)
+    {
+        var normalized = ProcessFocusPolicy.NormalizeProcessName(processName);
+        if (string.IsNullOrEmpty(normalized))
+        {
+            throw new ArgumentException("Process name cannot be empty.", nameof(processName));
+        }
+
+        var ceiling = maxDuration ?? TimeSpan.FromHours(12);
+        if (ceiling <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxDuration), "Max duration must be positive.");
+        }
+
+        StartInternal(ceiling, clamshellOverride, new ProcessWatchTarget(normalized, pid));
+    }
+
+    public void TurnOffDisplay()
+    {
+        if (_activeJournal is not null && Config.KeepDisplayAwake)
+        {
+            _power.EnableAwakeAssertion(keepDisplayAwake: false);
+        }
+
+        _power.TurnOffDisplay();
+    }
+
+    private void StartInternal(TimeSpan duration, bool? clamshellOverride, ProcessWatchTarget? watchTarget)
     {
         if (duration <= TimeSpan.Zero)
         {
@@ -96,12 +143,14 @@ public sealed class SessionEngine
             ClamshellEnabled: clamshell,
             LidBackup: lidBackup,
             LowPowerEngagedByApp: false,
-            AutoSleepOnEnd: Config.AutoSleepOnCompletion);
+            AutoSleepOnEnd: Config.AutoSleepOnCompletion,
+            WatchTarget: watchTarget);
 
         // True write-ahead journal before applying any OS power mutation.
         _journal.Save(entry);
         _activeJournal = entry;
         _lastStopReason = StopReason.None;
+        _watchMissingSinceUtc = null;
 
         if (clamshell && lidBackup is not null)
         {
@@ -124,6 +173,7 @@ public sealed class SessionEngine
         }
 
         LatestSnapshot = _monitor.GetSnapshot();
+        _startBatteryPercent = LatestSnapshot.HasBattery ? LatestSnapshot.BatteryPercent : null;
         NotifyChanged();
     }
 
@@ -263,6 +313,23 @@ public sealed class SessionEngine
             return;
         }
 
+        if (_activeJournal.WatchTarget is { } watchTarget)
+        {
+            if (_watcher.IsProcessRunning(watchTarget))
+            {
+                _watchMissingSinceUtc = null;
+            }
+            else
+            {
+                _watchMissingSinceUtc ??= _clock.UtcNow;
+                if (_clock.UtcNow - _watchMissingSinceUtc.Value >= _watchGracePeriod)
+                {
+                    StopInternal(StopReason.WatchedProcessExited, allowSleep: _activeJournal.AutoSleepOnEnd);
+                    return;
+                }
+            }
+        }
+
         NotifyChanged();
     }
 
@@ -285,7 +352,8 @@ public sealed class SessionEngine
                 ClamshellEnabled: Config.ClamshellEnabled,
                 LowPowerEngaged: false,
                 LastStopReason: _lastStopReason,
-                Focus: FocusReport.Empty);
+                Focus: FocusReport.Empty,
+                WatchTarget: null);
         }
 
         var now = _clock.UtcNow;
@@ -310,7 +378,8 @@ public sealed class SessionEngine
             ClamshellEnabled: _activeJournal.ClamshellEnabled,
             LowPowerEngaged: _activeJournal.LowPowerEngagedByApp,
             LastStopReason: _lastStopReason,
-            Focus: _activeFocus);
+            Focus: _activeFocus,
+            WatchTarget: _activeJournal.WatchTarget);
     }
 
     private bool EvaluateSafetyRules(SystemPowerSnapshot snapshot)
@@ -378,8 +447,35 @@ public sealed class SessionEngine
     private void StopInternal(StopReason reason, bool allowSleep)
     {
         var current = _activeJournal;
+        var focusSnapshot = _activeFocus;
+        var startBattery = _startBatteryPercent;
+
         _activeJournal = null;
+        _startBatteryPercent = null;
+        _watchMissingSinceUtc = null;
         _lastStopReason = reason;
+
+        if (current is not null && reason != StopReason.CrashRecovery)
+        {
+            var endedAt = _clock.UtcNow;
+            var actual = endedAt > current.StartedAtUtc
+                ? endedAt - current.StartedAtUtc
+                : TimeSpan.Zero;
+            var endBattery = LatestSnapshot?.HasBattery == true
+                ? LatestSnapshot.BatteryPercent
+                : (int?)null;
+
+            _historyStore.Append(new SessionHistoryRecord(
+                StartedAtUtc: current.StartedAtUtc,
+                EndedAtUtc: endedAt,
+                ActualDuration: actual,
+                StopReason: reason,
+                ClamshellEnabled: current.ClamshellEnabled,
+                StartBatteryPercent: startBattery,
+                EndBatteryPercent: endBattery,
+                ReclaimedRamBytes: focusSnapshot.ReclaimedRamBytes,
+                WatchedProcessName: current.WatchTarget?.ProcessName));
+        }
 
         if (current?.LidBackup is not null)
         {

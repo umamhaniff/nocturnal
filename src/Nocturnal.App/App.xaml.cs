@@ -23,6 +23,7 @@ public partial class App : System.Windows.Application
     private RegisteredWaitHandle? _gracefulExitWaitHandle;
     private SessionEngine? _engine;
     private AppUpdateService? _updateService;
+    private NocturnalIpcServer? _ipcServer;
     private TrayIconService? _trayIcon;
     private MainPopupWindow? _popup;
     private DispatcherTimer? _timer;
@@ -74,11 +75,16 @@ public partial class App : System.Windows.Application
             new WindowsSystemMonitor(),
             new FileJournalStore(),
             new FileConfigStore(),
-            focusController: new WindowsAgentFocusController());
+            focusController: new WindowsAgentFocusController(),
+            processWatcher: new WindowsProcessWatcher(),
+            historyStore: new FileSessionHistoryStore());
 
         // Restore any stale power state from a previous crash, then populate initial telemetry.
         _engine.RecoverIfNeeded();
         _engine.Tick();
+
+        _ipcServer = new NocturnalIpcServer(_engine, Dispatcher);
+        _ipcServer.Start();
 
         SystemEvents.SessionEnding += OnSessionEnding;
         SessionEnding += (_, _) => ExitApplication();
@@ -196,6 +202,7 @@ public partial class App : System.Windows.Application
         _gracefulExitEvent?.Dispose();
         _timer?.Stop();
         _updateTimer?.Stop();
+        _ipcServer?.Dispose();
         _engine?.Stop(StopReason.AppExiting);
         _trayIcon?.Dispose();
         _popup?.ForceClose();

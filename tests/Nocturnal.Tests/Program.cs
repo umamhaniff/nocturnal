@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Nocturnal.Core;
 
 namespace Nocturnal.Tests;
@@ -29,6 +30,14 @@ internal static class Program
         Run("UpdatePolicy_IgnoresSameOlderOrPrereleaseVersions", TestUpdatePolicyIgnoresSameOlderOrPrerelease);
         Run("UpdatePolicy_RejectsUntrustedDownloadHosts", TestUpdatePolicyRejectsUntrustedHosts);
         Run("UpdatePolicy_BuildsPerUserAndPerMachineSilentRelaunchArgs", TestUpdatePolicyInstallerArgs);
+        Run("TurnOffDisplay_DisablesDisplayAssertion_AndCallsPower", TestTurnOffDisplay);
+        Run("Stop_RecordsSessionHistory_AndCapsAtMaxEntries", TestSessionHistoryRecording);
+        Run("WatchProcess_StopsAfterGracePeriod_WhenProcessExits", TestWatchProcessExitsAfterGrace);
+        Run("WatchProcess_ResetsGraceTimer_IfProcessRestartsWithinGrace", TestWatchProcessResetsGraceOnRestart);
+        Run("WatchProcess_RespectsMaxDurationCeiling", TestWatchProcessMaxDuration);
+        Run("IpcCommandParser_ParsesStartExtendWatchAndFlags", TestIpcCommandParserValid);
+        Run("IpcCommandParser_RejectsInvalidDurationsAndUnknownFlags", TestIpcCommandParserInvalid);
+        Run("IpcProtocol_SerializesStatusAndHistoryPayloadsCleanly", TestIpcProtocolJsonRoundTrip);
 
         Console.WriteLine($"\nResults: {_passed} passed, {_failed} failed.");
         return _failed == 0 ? 0 : 1;
@@ -59,6 +68,12 @@ internal static class Program
 
     private static (SessionEngine engine, FakePowerController power, FakeSystemMonitor monitor, InMemoryJournalStore journal, FakeClock clock, FakeAgentFocusController focus) CreateHarness()
     {
+        var (engine, power, monitor, journal, clock, focus, _, _) = CreateFullHarness();
+        return (engine, power, monitor, journal, clock, focus);
+    }
+
+    private static (SessionEngine engine, FakePowerController power, FakeSystemMonitor monitor, InMemoryJournalStore journal, FakeClock clock, FakeAgentFocusController focus, FakeProcessWatcher watcher, InMemorySessionHistoryStore history) CreateFullHarness(TimeSpan? watchGracePeriod = null)
+    {
         var callLog = new List<string>();
         var power = new FakePowerController(callLog);
         var monitor = new FakeSystemMonitor();
@@ -66,8 +81,10 @@ internal static class Program
         var config = new InMemoryConfigStore();
         var clock = new FakeClock(new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero));
         var focus = new FakeAgentFocusController();
-        var engine = new SessionEngine(power, monitor, journal, config, clock, focus);
-        return (engine, power, monitor, journal, clock, focus);
+        var watcher = new FakeProcessWatcher();
+        var history = new InMemorySessionHistoryStore();
+        var engine = new SessionEngine(power, monitor, journal, config, clock, focus, watcher, history, watchGracePeriod);
+        return (engine, power, monitor, journal, clock, focus, watcher, history);
     }
 
     private static void TestStartAndStop()
@@ -488,19 +505,159 @@ internal static class Program
             "Per-machine args must include silent, relaunch, and allusers");
     }
 
+    private static void TestTurnOffDisplay()
+    {
+        var (engine, power, _, _, _, _, _, _) = CreateFullHarness();
+        engine.UpdateConfig(c => c.KeepDisplayAwake = true);
+        engine.Start(TimeSpan.FromMinutes(20));
+
+        engine.TurnOffDisplay();
+
+        Assert(power.DisplayOffCount == 1, "TurnOffDisplay must invoke power controller");
+        Assert(power.LastKeepDisplayAwake == false, "TurnOffDisplay must clear display-awake assertion so Windows turns panel off");
+    }
+
+    private static void TestSessionHistoryRecording()
+    {
+        var (engine, _, monitor, _, clock, _, _, history) = CreateFullHarness();
+        engine.UpdateConfig(c => c.AgentFocusEnabled = true);
+        monitor.Snapshot = new SystemPowerSnapshot(false, 82, true, ThermalLevel.Normal, 49.0);
+
+        for (var i = 0; i < 12; i++)
+        {
+            engine.Start(TimeSpan.FromMinutes(15));
+            clock.Advance(TimeSpan.FromMinutes(5));
+            engine.Stop(StopReason.Manual);
+        }
+
+        var loaded = engine.GetRecentHistory();
+        Assert(loaded.Count == 10, $"History should cap at 10 entries, got {loaded.Count}");
+        Assert(loaded[0].StopReason == StopReason.Manual, "History should record StopReason");
+        Assert(loaded[0].StartBatteryPercent == 82, "History should record start battery percentage");
+        Assert(loaded[0].ReclaimedRamBytes > 0, "History should capture Focus reclaimed RAM");
+    }
+
+    private static void TestWatchProcessExitsAfterGrace()
+    {
+        var (engine, power, _, _, clock, _, watcher, history) = CreateFullHarness(TimeSpan.FromSeconds(15));
+        watcher.IsRunning = true;
+        engine.StartWatchingProcess("python.exe", pid: 4242, maxDuration: TimeSpan.FromHours(2));
+
+        Assert(engine.GetStatus().WatchTarget?.ProcessName == "python", "Watched process name should be normalized");
+
+        watcher.IsRunning = false;
+        engine.Tick();
+        Assert(engine.GetStatus().IsActive, "Must stay active when disappearance is first observed");
+
+        clock.Advance(TimeSpan.FromSeconds(10));
+        engine.Tick();
+        Assert(engine.GetStatus().IsActive, "Must stay active before grace period elapses");
+
+        clock.Advance(TimeSpan.FromSeconds(5));
+        engine.Tick();
+        Assert(!engine.GetStatus().IsActive, "Session must stop once grace period elapses");
+        Assert(engine.GetStatus().LastStopReason == StopReason.WatchedProcessExited, "Should record WatchedProcessExited");
+        Assert(power.Slept, "Should auto-sleep when AutoSleepOnCompletion is true");
+        Assert(history.Load()[0].WatchedProcessName == "python", "History should record watched process name");
+    }
+
+    private static void TestWatchProcessResetsGraceOnRestart()
+    {
+        var (engine, _, _, _, clock, _, watcher, _) = CreateFullHarness(TimeSpan.FromSeconds(15));
+        watcher.IsRunning = true;
+        engine.StartWatchingProcess("dotnet");
+
+        watcher.IsRunning = false;
+        engine.Tick();
+        clock.Advance(TimeSpan.FromSeconds(10));
+        engine.Tick();
+
+        watcher.IsRunning = true;
+        clock.Advance(TimeSpan.FromSeconds(5));
+        engine.Tick();
+        Assert(engine.GetStatus().IsActive, "Grace timer must reset when process comes back");
+
+        watcher.IsRunning = false;
+        engine.Tick();
+        clock.Advance(TimeSpan.FromSeconds(10));
+        engine.Tick();
+        Assert(engine.GetStatus().IsActive, "Restarted grace timer should require full 15s again");
+
+        clock.Advance(TimeSpan.FromSeconds(5));
+        engine.Tick();
+        Assert(!engine.GetStatus().IsActive, "Restarted grace timer should expire after full 15s");
+    }
+
+    private static void TestWatchProcessMaxDuration()
+    {
+        var (engine, power, _, _, clock, _, watcher, _) = CreateFullHarness(TimeSpan.FromSeconds(15));
+        watcher.IsRunning = true;
+        engine.StartWatchingProcess("node", maxDuration: TimeSpan.FromHours(1));
+
+        clock.Advance(TimeSpan.FromHours(1));
+        engine.Tick();
+
+        Assert(!engine.GetStatus().IsActive, "Max duration safety ceiling must stop session even if process is still running");
+        Assert(engine.GetStatus().LastStopReason == StopReason.TimerExpired, "Max ceiling expiry must record TimerExpired");
+        Assert(power.Slept, "Ceiling expiry should honor AutoSleepOnCompletion");
+    }
+
+    private static void TestIpcCommandParserValid()
+    {
+        Assert(IpcCommandParser.TryParseArgs(["start", "2h", "--focus", "--no-clamshell"], out var reqStart, out _)
+            && reqStart is { Action: "start", DurationSeconds: 7200, AgentFocus: true, Clamshell: false },
+            "Should parse start duration and flags");
+
+        Assert(IpcCommandParser.TryParseArgs(["extend", "1h30m"], out var reqExtend, out _)
+            && reqExtend is { Action: "extend", DurationSeconds: 5400 },
+            "Should parse compound duration 1h30m");
+
+        Assert(IpcCommandParser.TryParseArgs(["watch", "python.exe", "--pid", "9001", "--max", "6h"], out var reqWatch, out _)
+            && reqWatch is { Action: "watch", WatchProcess: "python", WatchPid: 9001, DurationSeconds: 21600 },
+            "Should parse watch target, pid, and max ceiling");
+
+        Assert(IpcCommandParser.TryParseArgs(["screen-off"], out var reqScreen, out _)
+            && reqScreen is { Action: "screen-off" },
+            "Should parse screen-off command");
+    }
+
+    private static void TestIpcCommandParserInvalid()
+    {
+        Assert(!IpcCommandParser.TryParseArgs(["start", "0m"], out _, out _), "Zero duration must be rejected");
+        Assert(!IpcCommandParser.TryParseArgs(["start", "99d"], out _, out _), "Over-30-day duration must be rejected");
+        Assert(!IpcCommandParser.TryParseArgs(["start", "10m", "--bogus"], out _, out _), "Unknown flag must be rejected");
+        Assert(!IpcCommandParser.TryParseArgs(["watch", "python", "--pid", "-5"], out _, out _), "Negative PID must be rejected");
+    }
+
+    private static void TestIpcProtocolJsonRoundTrip()
+    {
+        var resp = new IpcResponse(
+            true,
+            "Awake",
+            new IpcStatusPayload(true, 1800, DateTimeOffset.UtcNow, true, true, 5, 1, 64 * 1024 * 1024, "python", "None", 88, true),
+            [new SessionHistoryRecord(DateTimeOffset.UtcNow.AddHours(-1), DateTimeOffset.UtcNow, TimeSpan.FromHours(1), StopReason.TimerExpired, true, 90, 82, 32 * 1024 * 1024, "dotnet")]);
+
+        var json = JsonSerializer.Serialize(resp);
+        var roundTrip = JsonSerializer.Deserialize<IpcResponse>(json);
+        Assert(roundTrip is { Ok: true, Status.WatchProcess: "python", History.Count: 1 }, "IPC response should round-trip cleanly");
+    }
+
     private sealed class FakePowerController(List<string> callLog) : IPowerController
     {
         public List<string> CallLog { get; } = callLog;
         public bool AwakeEnabled { get; private set; }
+        public bool LastKeepDisplayAwake { get; private set; }
         public bool ClamshellActive { get; private set; }
         public LidActionBackup? RestoredBackup { get; private set; }
         public bool? PowerSaverState { get; private set; }
+        public int DisplayOffCount { get; private set; }
         public bool Slept { get; private set; }
 
         public void EnableAwakeAssertion(bool keepDisplayAwake)
         {
             CallLog.Add("Power.EnableAwakeAssertion");
             AwakeEnabled = true;
+            LastKeepDisplayAwake = keepDisplayAwake;
         }
 
         public void DisableAwakeAssertion() => AwakeEnabled = false;
@@ -528,6 +685,8 @@ internal static class Program
             PowerSaverState = enabled;
             return true;
         }
+
+        public void TurnOffDisplay() => DisplayOffCount++;
 
         public void SleepSystem() => Slept = true;
     }
@@ -574,7 +733,7 @@ internal static class Program
         public FocusReport Engage(AppConfig config)
         {
             EngageCount++;
-            return new FocusReport(true, 4, 1, 0, ["Discord"]);
+            return new FocusReport(true, 4, 1, 0, ["Discord"], 64 * 1024 * 1024);
         }
 
         public IReadOnlyList<SuspendedProcessRecord> GetSuspendedProcesses() =>
@@ -584,5 +743,27 @@ internal static class Program
 
         public void RecoverSuspended(IReadOnlyList<SuspendedProcessRecord> records) =>
             RecoveredRecords.AddRange(records);
+    }
+
+    private sealed class FakeProcessWatcher : IProcessWatcher
+    {
+        public bool IsRunning { get; set; } = true;
+        public bool IsProcessRunning(ProcessWatchTarget target) => IsRunning;
+    }
+
+    private sealed class InMemorySessionHistoryStore : ISessionHistoryStore
+    {
+        private readonly List<SessionHistoryRecord> _records = [];
+
+        public IReadOnlyList<SessionHistoryRecord> Load() => _records.ToList();
+
+        public void Append(SessionHistoryRecord record, int maxEntries = 10)
+        {
+            _records.Insert(0, record);
+            if (_records.Count > maxEntries)
+            {
+                _records.RemoveRange(maxEntries, _records.Count - maxEntries);
+            }
+        }
     }
 }

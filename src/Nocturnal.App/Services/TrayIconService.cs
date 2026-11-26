@@ -66,6 +66,11 @@ public sealed class TrayIconService : IDisposable
         menu.Items.Add(_focusItem);
         menu.Items.Add(CreateStyleMenu());
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Turn Display Off", null, async (_, _) =>
+        {
+            await Task.Delay(250);
+            _engine.TurnOffDisplay();
+        });
         menu.Items.Add(_stopItem);
         menu.Items.Add(_updateItem);
         menu.Items.Add("Open Nocturnal", null, (_, _) => _togglePopup());
@@ -110,8 +115,9 @@ public sealed class TrayIconService : IDisposable
         if (status.IsActive)
         {
             var rem = FormatRemaining(status.Remaining);
-            _statusItem.Text = $"Awake: {rem} left";
-            _notifyIcon.Text = TruncateTooltip($"Nocturnal — {rem} left" + (status.ClamshellEnabled ? " (Clamshell)" : ""));
+            var watchSuffix = status.WatchTarget is { } w ? $" • Watching {w.ProcessName}" : "";
+            _statusItem.Text = $"Awake: {rem} left{watchSuffix}";
+            _notifyIcon.Text = TruncateTooltip($"Nocturnal — {rem} left" + (status.WatchTarget is not null ? $" ({status.WatchTarget.ProcessName})" : status.ClamshellEnabled ? " (Clamshell)" : ""));
         }
         else
         {

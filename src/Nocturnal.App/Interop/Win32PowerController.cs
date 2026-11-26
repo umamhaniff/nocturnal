@@ -65,6 +65,9 @@ public sealed class Win32PowerController : IPowerController
     [DllImport("powrprof.dll", SetLastError = true)]
     private static extern bool SetSuspendState(bool hibernate, bool forceCritical, bool disableWakeEvent);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SendNotifyMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
     [DllImport("kernel32.dll")]
     private static extern IntPtr LocalFree(IntPtr hMem);
 
@@ -163,6 +166,16 @@ public sealed class Win32PowerController : IPowerController
         {
             return false;
         }
+    }
+
+    public void TurnOffDisplay()
+    {
+        const uint WmSysCommand = 0x0112;
+        const int ScMonitorPower = 0xF170;
+        const int MonitorOff = 2;
+        var hwndBroadcast = new IntPtr(0xFFFF);
+
+        SendNotifyMessageW(hwndBroadcast, WmSysCommand, new IntPtr(ScMonitorPower), new IntPtr(MonitorOff));
     }
 
     public void SleepSystem()

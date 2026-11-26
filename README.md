@@ -53,10 +53,13 @@ Closing a Windows laptop lid immediately suspends long builds, web scrapers, loc
 
 | Capability | What It Does |
 | :--- | :--- |
-| **Timed Awake Sessions** | Custom `Days / Hours / Minutes` durations, quick presets (`+15m`, `+30m`, `+1h`, `+4h`), and configurable auto-sleep when the timer expires. |
+| **Timed Awake Sessions** | Custom `Days / Hours / Minutes` durations, quick presets (`+15m`, `+30m`, `+1h`, `+4h`), **Watch Process** ("awake until process exits"), and configurable auto-sleep on completion. |
 | **Safe Clamshell Mode** | Temporarily sets Windows `LIDACTION` to *Do Nothing* on active AC and DC power schemes via `PowrProf.dll`, restoring exact baseline values on stop. |
+| **One-Click Display Off** | Turns the display panel off instantly via `SC_MONITORPOWER` without triggering sleep—ideal for lid-open overnight runs or remote desktop. |
 | **Battery & Thermal Guards** | Engages Windows Energy Saver below `40%` battery (configurable) and forces an emergency stop + sleep at critical battery (`10%`) or thermal limits (graceful fallback when OEM firmware locks ACPI sensors). |
 | **Write-Ahead Crash Recovery** | Persists baseline power configuration and paused PIDs to `%LocalAppData%\Nocturnal\journal.json` prior to OS mutation, automatically restoring stale state on next startup. |
+| **CLI & Local IPC (`nocturnal-cli`)** | Control Nocturnal from any terminal or AI coding agent (`start`, `extend`, `watch`, `stop`, `status --json`, `history --json`, `screen-off`) over a current-user Named Pipe. |
+| **Live Telemetry & Session History** | Displays physical RAM reclaimed during Focus Mode plus recent session logs (duration, stop reason, battery delta, and RAM trimmed) in `%LocalAppData%\Nocturnal\history.json`. |
 | **Midnight Glass Tray UI** | Borderless WPF flyout with a radial countdown ring, custom toggle switches, `Timer` / `Focus` / `Settings` tabs, 4 tray styles (`Pills`, `Compact`, `Minimal`, `Popover`), and dynamic **Crescent Pulse** tray icon states. |
 | **Auto-Detect & One-Click Updates** | Silently checks GitHub Releases for newer versions (opt-out in Settings), displays an instant tray alert and top update banner, verifies SHA-256 checksums, downloads over HTTPS, and upgrades silently with automatic relaunch. |
 | **Ultra-Light Footprint** | Pure `.NET 9` WPF + Win32 P/Invoke architecture—zero Electron, zero WebView2, low memory overhead on 8 GB systems. |
@@ -102,13 +105,27 @@ Start Session
 ## Installation
 
 ### Option 1: Windows Installer (Recommended — No .NET Runtime Required)
-1. Download the latest `Nocturnal-Setup-1.1.1.exe` from [**GitHub Releases**](https://github.com/umamhaniff/nocturnal/releases/latest).
-2. Run the installer—installs per-user by default (no administrator prompt required), registers a Start Menu shortcut, optional startup autostart, and a clean uninstaller.
+1. Download the latest `Nocturnal-Setup-1.2.0.exe` from [**GitHub Releases**](https://github.com/umamhaniff/nocturnal/releases/latest).
+2. Run the installer—installs per-user by default (no administrator prompt required), registers a Start Menu shortcut, adds `nocturnal-cli` to your user `PATH`, optional startup autostart, and a clean uninstaller.
 
 Silent per-user installation / upgrade:
 
 ```powershell
-.\Nocturnal-Setup-1.1.1.exe /VERYSILENT /CURRENTUSER
+.\Nocturnal-Setup-1.2.0.exe /VERYSILENT /CURRENTUSER
+```
+
+### Terminal & AI Agent CLI (`nocturnal-cli`)
+
+Control the running tray daemon from PowerShell, batch scripts, or AI coding agents:
+
+```powershell
+nocturnal-cli status --json
+nocturnal-cli start 2h --focus
+nocturnal-cli watch python --max 6h
+nocturnal-cli extend 30m
+nocturnal-cli screen-off
+nocturnal-cli history
+nocturnal-cli stop
 ```
 
 ### Option 2: Portable / Build from Source
@@ -128,7 +145,7 @@ dotnet run --project tests/Nocturnal.Tests
 # Run from source
 dotnet run --project src/Nocturnal.App
 
-# Build self-contained win-x64 installer -> dist\Nocturnal-Setup-1.1.1.exe
+# Build self-contained win-x64 installer -> dist\Nocturnal-Setup-1.2.0.exe
 .\scripts\build-installer.ps1
 
 # Or publish framework-dependent single-file portable executable
@@ -147,8 +164,9 @@ Nocturnal/
 ├── installer/                # Inno Setup 6 script (Nocturnal.iss)
 ├── scripts/                  # Build & packaging automation (build-installer.ps1)
 ├── src/
-│   ├── Nocturnal.Core/       # Domain models, process-tree focus policy, guards, session engine
-│   └── Nocturnal.App/        # WPF Midnight Glass UI, NotifyIcon tray, Win32 power & focus interop
+│   ├── Nocturnal.Core/       # Domain models, process-tree focus policy, IPC parser, guards, engine
+│   ├── Nocturnal.App/        # WPF Midnight Glass UI, NotifyIcon tray, Named Pipe IPC, Win32 interop
+│   └── Nocturnal.Cli/        # Lightweight terminal CLI client (`nocturnal-cli.exe`)
 └── tests/
     └── Nocturnal.Tests/      # Unit test suite (power recovery, guards, process trees, crash resume)
 ```

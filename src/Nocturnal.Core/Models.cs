@@ -15,6 +15,7 @@ public enum StopReason
     TimerExpired,
     BatteryCritical,
     ThermalCritical,
+    WatchedProcessExited,
     CrashRecovery,
     AppExiting
 }
@@ -54,15 +55,31 @@ public sealed record ProcessNode(
     int SessionId,
     string? ImagePath);
 
+public sealed record ProcessWatchTarget(
+    string ProcessName,
+    int? Pid = null);
+
 public sealed record FocusReport(
     bool IsEngaged,
     int ThrottledProcessCount,
     int PausedProcessCount,
     int ClosedAppCount,
-    IReadOnlyList<string> AffectedAppNames)
+    IReadOnlyList<string> AffectedAppNames,
+    long ReclaimedRamBytes = 0)
 {
-    public static FocusReport Empty { get; } = new(false, 0, 0, 0, []);
+    public static FocusReport Empty { get; } = new(false, 0, 0, 0, [], 0);
 }
+
+public sealed record SessionHistoryRecord(
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset EndedAtUtc,
+    TimeSpan ActualDuration,
+    StopReason StopReason,
+    bool ClamshellEnabled,
+    int? StartBatteryPercent,
+    int? EndBatteryPercent,
+    long ReclaimedRamBytes,
+    string? WatchedProcessName);
 
 public sealed record SystemPowerSnapshot(
     bool IsOnAcPower,
@@ -84,7 +101,8 @@ public sealed record JournalEntry(
     LidActionBackup? LidBackup,
     bool LowPowerEngagedByApp,
     bool AutoSleepOnEnd,
-    IReadOnlyList<SuspendedProcessRecord>? SuspendedProcesses = null);
+    IReadOnlyList<SuspendedProcessRecord>? SuspendedProcesses = null,
+    ProcessWatchTarget? WatchTarget = null);
 
 public sealed class AppConfig
 {
@@ -130,4 +148,5 @@ public sealed record SessionStatus(
     bool ClamshellEnabled,
     bool LowPowerEngaged,
     StopReason LastStopReason,
-    FocusReport Focus);
+    FocusReport Focus,
+    ProcessWatchTarget? WatchTarget = null);
