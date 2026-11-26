@@ -82,6 +82,13 @@ public sealed record SessionProfile(
     bool KeepDisplayAwake,
     bool AutoSleepOnCompletion);
 
+public sealed record SessionOverrides(
+    bool? ClamshellEnabled = null,
+    bool? AgentFocusEnabled = null,
+    SelectedAppMode? SelectedAppMode = null,
+    bool? KeepDisplayAwake = null,
+    bool? AutoSleepOnCompletion = null);
+
 public sealed record FocusReport(
     bool IsEngaged,
     int ThrottledProcessCount,
@@ -146,6 +153,7 @@ public sealed class AppConfig
     public bool FocusRamTrimEnabled { get; set; } = true;
     public SelectedAppMode FocusSelectedAppMode { get; set; } = SelectedAppMode.Off;
     public bool FocusCloseSelectedApps { get; set; } = false;
+    public bool FocusPauseOnlyWhenLidClosed { get; set; } = true;
     public List<string> FocusAppsToClose { get; set; } = ["Discord", "Spotify", "Steam"];
     public List<string> CustomAppsToManage { get; set; } = [];
     public List<string> CustomAgentWhitelist { get; set; } = [];
@@ -161,6 +169,35 @@ public sealed class AppConfig
     public int NightShiftDurationMinutes { get; set; } = 240;
     public bool NightShiftRequireAcPower { get; set; } = true;
     public string NightShiftProfileName { get; set; } = "AI Overnight";
+    public string? LastNightShiftDate { get; set; }
+
+    public void Normalize()
+    {
+        FocusAppsToClose ??= ["Discord", "Spotify", "Steam"];
+        CustomAppsToManage ??= [];
+        CustomAgentWhitelist ??= [];
+        AlertWebhookUrl ??= string.Empty;
+        BackupWifiSsid ??= string.Empty;
+        NightShiftStartTime = string.IsNullOrWhiteSpace(NightShiftStartTime) ? "22:00" : NightShiftStartTime.Trim();
+        NightShiftProfileName = string.IsNullOrWhiteSpace(NightShiftProfileName) ? "AI Overnight" : NightShiftProfileName.Trim();
+
+        LowPowerBatteryThresholdPercent = Math.Clamp(LowPowerBatteryThresholdPercent, 0, 99);
+        CriticalBatteryPercent = Math.Clamp(CriticalBatteryPercent, 0, 99);
+        if (LowPowerBatteryThresholdPercent > 0 && CriticalBatteryPercent >= LowPowerBatteryThresholdPercent)
+        {
+            CriticalBatteryPercent = Math.Max(0, LowPowerBatteryThresholdPercent - 1);
+        }
+
+        WarmTempCelsius = double.IsFinite(WarmTempCelsius) ? Math.Clamp(WarmTempCelsius, 40.0, 115.0) : 80.0;
+        CriticalTempCelsius = double.IsFinite(CriticalTempCelsius) ? Math.Clamp(CriticalTempCelsius, 50.0, 120.0) : 95.0;
+        if (CriticalTempCelsius <= WarmTempCelsius)
+        {
+            CriticalTempCelsius = Math.Min(120.0, WarmTempCelsius + 5.0);
+        }
+
+        NightShiftDurationMinutes = Math.Clamp(NightShiftDurationMinutes, 5, 1440);
+        DefaultAddMinutes = Math.Clamp(DefaultAddMinutes, 1, 1440);
+    }
 }
 
 public sealed record UpdateReleaseInfo(
@@ -186,4 +223,8 @@ public sealed record SessionStatus(
     FocusReport Focus,
     ProcessWatchTarget? WatchTarget = null,
     string? ActiveProfileName = null,
-    bool WifiFailoverTriggered = false);
+    bool WifiFailoverTriggered = false,
+    bool IsLidClosed = false,
+    bool ClamshellApplyFailed = false,
+    bool FocusArmedForLidClose = false,
+    int? PendingSleepSeconds = null);

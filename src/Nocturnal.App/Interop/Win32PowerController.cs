@@ -233,26 +233,54 @@ public sealed class Win32PowerController : IPowerController
         return new LidActionBackup(schemeGuid, (int)origAc, (int)origDc);
     }
 
-    public void ApplyClamshellMode(Guid schemeGuid)
+    public bool ApplyClamshellMode(Guid schemeGuid)
     {
         var sub = SubButtons;
         var lid = LidAction;
 
         // 0 = Do nothing when lid is closed
-        PowerWriteACValueIndex(IntPtr.Zero, ref schemeGuid, ref sub, ref lid, 0);
-        PowerWriteDCValueIndex(IntPtr.Zero, ref schemeGuid, ref sub, ref lid, 0);
-        PowerSetActiveScheme(IntPtr.Zero, ref schemeGuid);
+        if (PowerWriteACValueIndex(IntPtr.Zero, ref schemeGuid, ref sub, ref lid, 0) != 0)
+        {
+            return false;
+        }
+
+        if (PowerWriteDCValueIndex(IntPtr.Zero, ref schemeGuid, ref sub, ref lid, 0) != 0)
+        {
+            return false;
+        }
+
+        if (PowerSetActiveScheme(IntPtr.Zero, ref schemeGuid) != 0)
+        {
+            return false;
+        }
+
+        return PowerReadACValueIndex(IntPtr.Zero, ref schemeGuid, ref sub, ref lid, out var verifyAc) == 0
+            && PowerReadDCValueIndex(IntPtr.Zero, ref schemeGuid, ref sub, ref lid, out var verifyDc) == 0
+            && verifyAc == 0
+            && verifyDc == 0;
     }
 
-    public void RestoreClamshellMode(LidActionBackup backup)
+    public bool RestoreClamshellMode(LidActionBackup backup)
     {
         var schemeGuid = backup.SchemeGuid;
         var sub = SubButtons;
         var lid = LidAction;
 
-        PowerWriteACValueIndex(IntPtr.Zero, ref schemeGuid, ref sub, ref lid, (uint)backup.OriginalAcLidAction);
-        PowerWriteDCValueIndex(IntPtr.Zero, ref schemeGuid, ref sub, ref lid, (uint)backup.OriginalDcLidAction);
-        PowerSetActiveScheme(IntPtr.Zero, ref schemeGuid);
+        var acRes = PowerWriteACValueIndex(IntPtr.Zero, ref schemeGuid, ref sub, ref lid, (uint)backup.OriginalAcLidAction);
+        var dcRes = PowerWriteDCValueIndex(IntPtr.Zero, ref schemeGuid, ref sub, ref lid, (uint)backup.OriginalDcLidAction);
+        var actRes = PowerSetActiveScheme(IntPtr.Zero, ref schemeGuid);
+        return acRes == 0 && dcRes == 0 && actRes == 0;
+    }
+
+    public bool RestoreDefaultLidAction()
+    {
+        if (!TryGetActiveScheme(out var schemeGuid))
+        {
+            return false;
+        }
+
+        // 1 = Sleep when lid is closed (Windows default safe state)
+        return RestoreClamshellMode(new LidActionBackup(schemeGuid, 1, 1));
     }
 
     public int? ReadEnergySaverThreshold()

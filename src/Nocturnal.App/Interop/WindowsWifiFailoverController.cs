@@ -1,13 +1,18 @@
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Net.NetworkInformation;
-using System.Net.Sockets;
 using Nocturnal.Core;
 
 namespace Nocturnal.App.Interop;
 
 public sealed class WindowsWifiFailoverController : INetworkFailoverController
 {
+    private static readonly HttpClient ProbeHttp = new()
+    {
+        Timeout = TimeSpan.FromSeconds(2)
+    };
+
     private volatile bool _lastWanProbeSucceeded = true;
     private long _lastProbeTicksUtc;
     private int _probeInFlight;
@@ -168,17 +173,16 @@ public sealed class WindowsWifiFailoverController : INetworkFailoverController
     }
 
     private static async Task<bool> ProbeInternetAsync() =>
-        await ProbeEndpointAsync("1.1.1.1", 53).ConfigureAwait(false)
-        || await ProbeEndpointAsync("8.8.8.8", 53).ConfigureAwait(false);
+        await ProbeHttpEndpointAsync("http://www.msftconnecttest.com/connecttest.txt").ConfigureAwait(false)
+        || await ProbeHttpEndpointAsync("https://connectivitycheck.gstatic.com/generate_204").ConfigureAwait(false);
 
-    private static async Task<bool> ProbeEndpointAsync(string host, int port)
+    private static async Task<bool> ProbeHttpEndpointAsync(string url)
     {
         try
         {
-            using var client = new TcpClient();
-            using var cts = new CancellationTokenSource(1500);
-            await client.ConnectAsync(host, port, cts.Token).ConfigureAwait(false);
-            return true;
+            using var cts = new CancellationTokenSource(2000);
+            using var resp = await ProbeHttp.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
+            return (int)resp.StatusCode is >= 200 and < 400;
         }
         catch
         {

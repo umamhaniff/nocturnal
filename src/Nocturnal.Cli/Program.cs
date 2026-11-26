@@ -45,10 +45,16 @@ internal static class Program
             pipe.Flush();
 
             using var reader = new StreamReader(pipe, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-            var rawResponse = reader.ReadLine();
+            using var readCts = new CancellationTokenSource(5000);
+            var rawResponse = reader.ReadLineAsync(readCts.Token).AsTask().GetAwaiter().GetResult();
             response = string.IsNullOrWhiteSpace(rawResponse)
                 ? null
                 : JsonSerializer.Deserialize<IpcResponse>(rawResponse, JsonOptions);
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("Nocturnal daemon timed out responding.");
+            return 2;
         }
         catch (TimeoutException)
         {
@@ -114,7 +120,10 @@ internal static class Program
         if (st.AgentFocusEnabled && st.IsActive)
         {
             var mb = Math.Round(st.ReclaimedRamBytes / (1024.0 * 1024.0), 1);
-            Console.WriteLine($"Focus: {st.ThrottledCount} throttled, {st.PausedCount} paused, ~{mb} MB RAM trimmed");
+            var focusState = st.FocusArmedForLidClose
+                ? "armed (pauses on lid close)"
+                : $"{st.PausedCount} paused";
+            Console.WriteLine($"Focus: {st.ThrottledCount} throttled, {focusState}, ~{mb} MB working set trimmed");
         }
 
         if (st.BatteryPercent.HasValue)

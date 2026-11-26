@@ -560,9 +560,9 @@
                     <Button Style="{StaticResource DangerIconButtonStyle}"
                             ToolTip="Quit Nocturnal"
                             Click="Exit_Click">
-                        <Path Data="M3,3 L11,11 M11,3 L3,11"
+                        <Path Data="M7,2 V6.2 M3.9,3.6 A4.6,4.6 0 1 0 10.1,3.6"
                               Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              StrokeThickness="1.7"
+                              StrokeThickness="1.6"
                               StrokeStartLineCap="Round"
                               StrokeEndLineCap="Round"
                               Width="14"
@@ -604,6 +604,52 @@
                             VerticalAlignment="Center"
                             Click="InstallUpdate_Click" />
                 </Grid>
+            </Border>
+
+            <!-- Pending Auto-Sleep Banner -->
+            <Border x:Name="PendingSleepBannerBorder"
+                    Background="#2A1F10"
+                    BorderBrush="#F59E0B"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="10,7"
+                    Margin="0,0,0,10"
+                    Visibility="Collapsed">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="PendingSleepText"
+                               Text="Session ended — sleeping in 60s"
+                               FontSize="11.5"
+                               FontWeight="SemiBold"
+                               Foreground="#FDE68A"
+                               VerticalAlignment="Center"
+                               Margin="0,0,8,0" />
+                    <Button Grid.Column="1"
+                            Content="Cancel"
+                            Style="{StaticResource PresetButtonStyle}"
+                            Padding="10,4"
+                            Click="CancelPendingSleep_Click" />
+                </Grid>
+            </Border>
+
+            <!-- Persistent Validation / Safety Banner -->
+            <Border x:Name="ValidationBannerBorder"
+                    Background="#2A1F10"
+                    BorderBrush="#F59E0B"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="10,6"
+                    Margin="0,0,0,10"
+                    Visibility="Collapsed">
+                <TextBlock x:Name="ValidationBannerText"
+                           Text=""
+                           FontSize="11"
+                           FontWeight="SemiBold"
+                           Foreground="#FDE68A"
+                           TextWrapping="Wrap" />
             </Border>
 
             <!-- 3-Tab Segmented Navigation -->
@@ -726,15 +772,15 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Margin="0,0,6,0">
                             <TextBlock Text="Days" FontSize="10" Foreground="#8A99B0" Margin="2,0,0,3" />
-                            <TextBox x:Name="DaysBox" Text="0" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" />
+                            <TextBox x:Name="DaysBox" Text="0" MaxLength="2" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Margin="0,0,6,0">
                             <TextBlock Text="Hrs" FontSize="10" Foreground="#8A99B0" Margin="2,0,0,3" />
-                            <TextBox x:Name="HoursBox" Text="1" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" />
+                            <TextBox x:Name="HoursBox" Text="1" MaxLength="3" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" />
                         </StackPanel>
                         <StackPanel Grid.Column="2" Margin="0,0,8,0">
                             <TextBlock Text="Mins" FontSize="10" Foreground="#8A99B0" Margin="2,0,0,3" />
-                            <TextBox x:Name="MinutesBox" Text="0" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" />
+                            <TextBox x:Name="MinutesBox" Text="0" MaxLength="4" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" />
                         </StackPanel>
                         <Button Grid.Column="3"
                                 Content="Start"
@@ -859,7 +905,7 @@
                         Margin="0,0,0,10"
                         Visibility="Collapsed">
                     <TextBlock x:Name="FocusTelemetryText"
-                               Text="Reclaimed 0 MB RAM"
+                               Text="Trimmed ~0 MB working set"
                                FontSize="11.5"
                                FontWeight="SemiBold"
                                Foreground="#6EE7B7"
@@ -900,6 +946,21 @@
                                     <RadioButton x:Name="ModeCloseRadio" Content="Close" Tag="GracefulClose" GroupName="SelectedAppModeGroup" Style="{StaticResource SegmentTabStyle}" Checked="SelectedAppModeRadio_Checked" />
                                 </UniformGrid>
                             </Border>
+
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,8,0">
+                                    <TextBlock Text="Pause / Close only when lid closes" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                                    <TextBlock Text="Keeps browsers &amp; music active while lid open; auto-resumes" FontSize="10.5" Foreground="#8A99B0" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <CheckBox x:Name="FocusLidOnlySwitch"
+                                          Grid.Column="1"
+                                          Style="{StaticResource ToggleSwitchStyle}"
+                                          Click="FocusLidOnlySwitch_Click" />
+                            </Grid>
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -1038,7 +1099,10 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="Thermal protection (80°C / 95°C)" FontSize="12" Foreground="#E2E8F0" VerticalAlignment="Center" />
+                            <StackPanel>
+                                <TextBlock Text="Thermal protection" FontSize="12" Foreground="#E2E8F0" />
+                                <TextBlock x:Name="ThermalGuardSubText" Text="80°C warn / 95°C sleep" FontSize="10" Foreground="#8A99B0" />
+                            </StackPanel>
                             <CheckBox x:Name="ThermalGuardSwitch" Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" Click="ThermalGuardSwitch_Click" />
                         </Grid>
 
@@ -1154,7 +1218,7 @@
                                     <TextBlock x:Name="WifiFailoverChevron" Text="▸ " FontSize="11" Foreground="#8A99B0" VerticalAlignment="Center" />
                                     <TextBlock Text="Wi-Fi / Hotspot Failover" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
                                 </StackPanel>
-                                <TextBlock Text="Switch to saved backup SSID if offline" FontSize="10.5" Foreground="#8A99B0" />
+                                <TextBlock Text="Switch to saved Wi-Fi profile if offline" FontSize="10.5" Foreground="#8A99B0" />
                             </StackPanel>
                             <CheckBox x:Name="WifiFailoverSwitch" Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" Click="WifiFailoverSwitch_Click" />
                         </Grid>
@@ -1164,7 +1228,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="BackupSsidBox"
-                                     Tag="Backup Wi-Fi / hotspot SSID"
+                                     Tag="Saved Wi-Fi profile / SSID"
                                      Style="{StaticResource DarkInputStyle}"
                                      LostFocus="BackupSsidBox_LostFocus"
                                      Margin="0,0,6,0" />
@@ -1279,7 +1343,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
-                                <TextBlock x:Name="VersionText" Text="Nocturnal v1.3.1" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                                <TextBlock x:Name="VersionText" Text="Nocturnal v1.3.2" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
                                 <TextBlock x:Name="UpdateStatusText" Text="Check GitHub Releases" FontSize="10.5" Foreground="#8A99B0" />
                             </StackPanel>
                             <Button x:Name="CheckUpdateBtn"

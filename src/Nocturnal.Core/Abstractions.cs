@@ -5,8 +5,9 @@ public interface IPowerController
     void EnableAwakeAssertion(bool keepDisplayAwake);
     void DisableAwakeAssertion();
     LidActionBackup? ReadLidActionBackup();
-    void ApplyClamshellMode(Guid schemeGuid);
-    void RestoreClamshellMode(LidActionBackup backup);
+    bool ApplyClamshellMode(Guid schemeGuid);
+    bool RestoreClamshellMode(LidActionBackup backup);
+    bool RestoreDefaultLidAction();
     int? ReadEnergySaverThreshold();
     bool TrySetPowerSaver(bool enabled, int? restoreThreshold = null);
     void TurnOffDisplay();
@@ -20,6 +21,7 @@ public interface ISystemMonitor
 
 public interface IJournalStore
 {
+    bool WasLastLoadCorrupt { get; }
     JournalEntry? Load();
     void Save(JournalEntry entry);
     void Clear();
@@ -38,7 +40,7 @@ public interface IClock
 
 public interface IAgentFocusController
 {
-    FocusReport Engage(AppConfig config);
+    FocusReport Engage(AppConfig config, Action<SuspendedProcessRecord>? onAboutToSuspend = null);
     IReadOnlyList<SuspendedProcessRecord> GetSuspendedProcesses();
     void Restore();
     void RecoverSuspended(IReadOnlyList<SuspendedProcessRecord> records);
@@ -66,6 +68,18 @@ public interface IRecoveryHook
     void SetRecoveryArmed(bool armed);
 }
 
+public interface IUserPresenceMonitor
+{
+    TimeSpan GetIdleDuration();
+}
+
+public interface IAppLogger
+{
+    void Info(string message);
+    void Warn(string message);
+    void Error(string message, Exception? ex = null);
+}
+
 public interface INetworkFailoverController
 {
     bool HasInternetConnectivity();
@@ -74,7 +88,7 @@ public interface INetworkFailoverController
 
 public sealed class NoOpAgentFocusController : IAgentFocusController
 {
-    public FocusReport Engage(AppConfig config) => FocusReport.Empty;
+    public FocusReport Engage(AppConfig config, Action<SuspendedProcessRecord>? onAboutToSuspend = null) => FocusReport.Empty;
     public IReadOnlyList<SuspendedProcessRecord> GetSuspendedProcesses() => [];
     public void Restore() { }
     public void RecoverSuspended(IReadOnlyList<SuspendedProcessRecord> records) { }
@@ -100,6 +114,18 @@ public sealed class NoOpAlertNotifier : IAlertNotifier
 public sealed class NoOpRecoveryHook : IRecoveryHook
 {
     public void SetRecoveryArmed(bool armed) { }
+}
+
+public sealed class NoOpUserPresenceMonitor : IUserPresenceMonitor
+{
+    public TimeSpan GetIdleDuration() => TimeSpan.FromHours(1);
+}
+
+public sealed class NoOpAppLogger : IAppLogger
+{
+    public void Info(string message) { }
+    public void Warn(string message) { }
+    public void Error(string message, Exception? ex = null) { }
 }
 
 public sealed class NoOpNetworkFailoverController : INetworkFailoverController

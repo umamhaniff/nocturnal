@@ -77,10 +77,10 @@ public sealed class WindowsAgentFocusController : IAgentFocusController
     [DllImport("ntdll.dll")]
     private static extern int NtResumeProcess(IntPtr processHandle);
 
-    private readonly Dictionary<int, ProcessPriorityClass> _throttled = [];
+    private readonly Dictionary<int, (ProcessPriorityClass Priority, DateTimeOffset StartTimeUtc)> _throttled = [];
     private readonly List<SuspendedProcessRecord> _suspended = [];
 
-    public FocusReport Engage(AppConfig config)
+    public FocusReport Engage(AppConfig config, Action<SuspendedProcessRecord>? onAboutToSuspend = null)
     {
         Restore();
 
@@ -135,9 +135,11 @@ public sealed class WindowsAgentFocusController : IAgentFocusController
                     {
                         case ProcessAction.DeepPause:
                             var startUtc = proc.StartTime.ToUniversalTime();
+                            var suspRecord = new SuspendedProcessRecord(proc.Id, startUtc);
+                            onAboutToSuspend?.Invoke(suspRecord);
                             if (TrySuspendProcess(proc.Id))
                             {
-                                _suspended.Add(new SuspendedProcessRecord(proc.Id, startUtc));
+                                _suspended.Add(suspRecord);
                                 if (config.FocusRamTrimEnabled)
                                 {
                                     reclaimedRamBytes += TryTrimAndMeasureReclaimed(proc);
@@ -162,6 +164,7 @@ public sealed class WindowsAgentFocusController : IAgentFocusController
 
                         case ProcessAction.ThrottleEcoQos:
                             var origPriority = proc.PriorityClass;
+                            var procStartUtc = proc.StartTime.ToUniversalTime();
                             var ecoApplied = TrySetEcoQos(proc.Id, enable: true);
                             var priorityLowered = false;
                             if (origPriority is ProcessPriorityClass.Normal or ProcessPriorityClass.AboveNormal)
@@ -175,7 +178,7 @@ public sealed class WindowsAgentFocusController : IAgentFocusController
                             }
                             if (ecoApplied || priorityLowered)
                             {
-                                _throttled[proc.Id] = origPriority;
+                                _throttled[proc.Id] = (origPriority, procStartUtc);
                             }
                             break;
                     }
@@ -208,17 +211,21 @@ public sealed class WindowsAgentFocusController : IAgentFocusController
             _suspended.Clear();
         }
 
-        foreach (var (pid, origPriority) in _throttled)
+        foreach (var (pid, info) in _throttled)
         {
-            TrySetEcoQos(pid, enable: false);
             try
             {
                 using var proc = Process.GetProcessById(pid);
-                proc.PriorityClass = origPriority;
+                var startUtc = proc.StartTime.ToUniversalTime();
+                if (Math.Abs((startUtc - info.StartTimeUtc).TotalSeconds) <= 2.0)
+                {
+                    TrySetEcoQos(pid, enable: false);
+                    proc.PriorityClass = info.Priority;
+                }
             }
             catch
             {
-                // Process may have exited during the session.
+                // Process may have exited or PID was reused.
             }
         }
 
@@ -385,8 +392,8 @@ public sealed class WindowsAgentFocusController : IAgentFocusController
             var state = new ProcessPowerThrottlingState
             {
                 Version = 1,
-                ControlMask = PowerThrottlingProcessExecutionSpeed,
-                StateMask = enable ? PowerThrottlingProcessExecutionSpeed : 0
+                ControlMask = enable ? PowerThrottlingProcessExecutionSpeed : 0u,
+                StateMask = enable ? PowerThrottlingProcessExecutionSpeed : 0u
             };
 
             return SetProcessInformation(

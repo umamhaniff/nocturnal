@@ -30,6 +30,7 @@ public partial class MainPopupWindow : Window
     private readonly Action _prepareForInstallerExit;
     private readonly Action _finalizeExit;
     private readonly DispatcherTimer _idleTrimTimer;
+    private readonly DispatcherTimer _bannerTimer;
     private bool _isInitializing = true;
     private bool _allowClose;
     private bool _suppressDeactivateHide;
@@ -39,6 +40,8 @@ public partial class MainPopupWindow : Window
     private bool? _wifiFailoverExpanded;
     private bool? _alertsExpanded;
     private string? _pendingUnrunningWatch;
+    private DateTimeOffset? _confirmExitUntilUtc;
+    private DateTimeOffset? _confirmUpdateUntilUtc;
     private (bool IsActive, StopReason Reason, int HistoryCount)? _lastHistoryRenderKey;
 
     [DllImport("kernel32.dll")]
@@ -70,6 +73,12 @@ public partial class MainPopupWindow : Window
         _finalizeExit = finalizeExit;
 
         InitializeComponent();
+        _bannerTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        _bannerTimer.Tick += (_, _) =>
+        {
+            _bannerTimer.Stop();
+            ValidationBannerBorder.Visibility = Visibility.Collapsed;
+        };
         _idleTrimTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         _idleTrimTimer.Tick += (_, _) =>
         {
@@ -118,7 +127,16 @@ public partial class MainPopupWindow : Window
     {
         _allowClose = true;
         _idleTrimTimer.Stop();
+        _bannerTimer.Stop();
         Close();
+    }
+
+    private void ShowValidationBanner(string message)
+    {
+        ValidationBannerText.Text = message;
+        ValidationBannerBorder.Visibility = Visibility.Visible;
+        _bannerTimer.Stop();
+        _bannerTimer.Start();
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -177,6 +195,7 @@ public partial class MainPopupWindow : Window
         ModeOffRadio.IsChecked = effectiveMode == SelectedAppMode.Off;
         ModePauseRadio.IsChecked = effectiveMode == SelectedAppMode.DeepPause;
         ModeCloseRadio.IsChecked = effectiveMode == SelectedAppMode.GracefulClose;
+        FocusLidOnlySwitch.IsChecked = cfg.FocusPauseOnlyWhenLidClosed;
 
         AutoSleepSwitch.IsChecked = cfg.AutoSleepOnCompletion;
         KeepDisplaySwitch.IsChecked = cfg.KeepDisplayAwake;
@@ -203,7 +222,11 @@ public partial class MainPopupWindow : Window
             LogoSlashKnockout.Visibility = Visibility.Collapsed;
             LogoSlash.Visibility = Visibility.Collapsed;
 
-            HeaderStatusText.Text = status.ClamshellEnabled ? "Awake • Clamshell" : "Awake";
+            HeaderStatusText.Text = status.ClamshellEnabled
+                ? "Awake • Clamshell"
+                : status.ClamshellApplyFailed
+                    ? "Awake • Lid Failed"
+                    : "Awake";
             HeaderStatusText.Foreground = ActiveHeaderTextBrush;
 
             StatusTitleText.Text = FormatRemaining(status.Remaining);
@@ -241,6 +264,16 @@ public partial class MainPopupWindow : Window
             StopButton.Visibility = Visibility.Collapsed;
         }
 
+        if (status.PendingSleepSeconds is { } sleepSecs)
+        {
+            PendingSleepText.Text = $"Session ended — sleeping in {sleepSecs}s";
+            PendingSleepBannerBorder.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            PendingSleepBannerBorder.Visibility = Visibility.Collapsed;
+        }
+
         FocusSummaryText.Text = BuildFocusSummary(status);
         UpdateFocusTelemetryBanner(status);
 
@@ -260,6 +293,10 @@ public partial class MainPopupWindow : Window
                 : "Thermal N/A";
             var wifiTag = status.WifiFailoverTriggered ? " • Backup Wi-Fi" : "";
             TelemetryText.Text = $"{powerSource} • {batt} • {temp}{wifiTag}";
+
+            ThermalGuardSubText.Text = snapshot.TemperatureCelsius.HasValue
+                ? $"{_engine.Config.WarmTempCelsius:F0}°C warn / {_engine.Config.CriticalTempCelsius:F0}°C sleep"
+                : "Thermal sensor unavailable on this laptop";
         }
     }
 
@@ -268,12 +305,16 @@ public partial class MainPopupWindow : Window
         if (!status.IsActive || !status.Focus.IsEngaged)
         {
             return _engine.Config.AgentFocusEnabled
-                ? "Ready on session start"
+                ? (_engine.Config.FocusPauseOnlyWhenLidClosed ? "Armed: pauses selected on lid close" : "Ready on session start")
                 : "Throttle non-agent apps";
         }
 
         var parts = new List<string> { $"{status.Focus.ThrottledProcessCount} throttled" };
-        if (status.Focus.PausedProcessCount > 0)
+        if (status.FocusArmedForLidClose)
+        {
+            parts.Add("armed for lid close");
+        }
+        else if (status.Focus.PausedProcessCount > 0)
         {
             parts.Add($"{status.Focus.PausedProcessCount} paused");
         }
@@ -284,7 +325,7 @@ public partial class MainPopupWindow : Window
         if (status.Focus.ReclaimedRamBytes > 0)
         {
             var mb = Math.Round(status.Focus.ReclaimedRamBytes / (1024.0 * 1024.0), 0);
-            parts.Add($"~{mb} MB RAM saved");
+            parts.Add($"~{mb} MB working set trimmed");
         }
         return "Active: " + string.Join(", ", parts);
     }
@@ -294,7 +335,10 @@ public partial class MainPopupWindow : Window
         if (status.IsActive && status.Focus.IsEngaged)
         {
             var mb = Math.Round(status.Focus.ReclaimedRamBytes / (1024.0 * 1024.0), 1);
-            FocusTelemetryText.Text = $"Reclaimed ~{mb} MB RAM • {status.Focus.PausedProcessCount} paused • {status.Focus.ThrottledProcessCount} EcoQoS";
+            var pausePart = status.FocusArmedForLidClose
+                ? "armed for lid close"
+                : $"{status.Focus.PausedProcessCount} paused";
+            FocusTelemetryText.Text = $"Trimmed ~{mb} MB working set • {pausePart} • {status.Focus.ThrottledProcessCount} EcoQoS";
             FocusTelemetryBorder.Visibility = Visibility.Visible;
         }
         else
@@ -392,6 +436,7 @@ public partial class MainPopupWindow : Window
         ModeOffRadio.IsChecked = effectiveMode == SelectedAppMode.Off;
         ModePauseRadio.IsChecked = effectiveMode == SelectedAppMode.DeepPause;
         ModeCloseRadio.IsChecked = effectiveMode == SelectedAppMode.GracefulClose;
+        FocusLidOnlySwitch.IsChecked = cfg.FocusPauseOnlyWhenLidClosed;
 
         AutoSleepSwitch.IsChecked = cfg.AutoSleepOnCompletion;
         KeepDisplaySwitch.IsChecked = cfg.KeepDisplayAwake;
@@ -536,12 +581,14 @@ public partial class MainPopupWindow : Window
     {
         _engine.ApplyProfile("AI Overnight", startImmediately: true);
         SyncFromConfig();
+        ShowClamshellFailedBannerIfNeeded();
     }
 
     private void ProfileBuild_Click(object sender, RoutedEventArgs e)
     {
         _engine.ApplyProfile("Build / Scraper", startImmediately: true);
         SyncFromConfig();
+        ShowClamshellFailedBannerIfNeeded();
     }
 
     private void ProfilePresent_Click(object sender, RoutedEventArgs e)
@@ -552,18 +599,32 @@ public partial class MainPopupWindow : Window
 
     private void StartCustom_Click(object sender, RoutedEventArgs e)
     {
-        _ = int.TryParse(DaysBox.Text, out var days);
-        _ = int.TryParse(HoursBox.Text, out var hours);
-        _ = int.TryParse(MinutesBox.Text, out var mins);
-
-        var duration = new TimeSpan(Math.Max(0, days), Math.Max(0, hours), Math.Max(0, mins), 0);
-        if (duration > TimeSpan.Zero)
+        if (!int.TryParse(DaysBox.Text, out var days))
         {
-            _engine.Start(duration);
+            days = 0;
+        }
+        if (!int.TryParse(HoursBox.Text, out var hours))
+        {
+            hours = 0;
+        }
+        if (!int.TryParse(MinutesBox.Text, out var mins))
+        {
+            mins = 0;
+        }
+
+        long totalMinutes = (Math.Clamp((long)days, 0, 30) * 1440L)
+            + (Math.Clamp((long)hours, 0, 720) * 60L)
+            + Math.Clamp((long)mins, 0, 43200);
+        totalMinutes = Math.Min(totalMinutes, 30L * 1440L);
+
+        if (totalMinutes > 0)
+        {
+            _engine.Start(TimeSpan.FromMinutes(totalMinutes));
+            ShowClamshellFailedBannerIfNeeded();
         }
         else
         {
-            StatusSubText.Text = "Enter duration > 0";
+            ShowValidationBanner("Enter a positive duration (days, hours, or minutes).");
         }
     }
 
@@ -638,7 +699,7 @@ public partial class MainPopupWindow : Window
         if (string.IsNullOrEmpty(norm))
         {
             _pendingUnrunningWatch = null;
-            StatusSubText.Text = "Enter a process name";
+            ShowValidationBanner("Enter a process name to watch (or click Pick).");
             return;
         }
 
@@ -646,21 +707,32 @@ public partial class MainPopupWindow : Window
             && !string.Equals(_pendingUnrunningWatch, norm, StringComparison.OrdinalIgnoreCase))
         {
             _pendingUnrunningWatch = norm;
-            StatusSubText.Text = $"'{norm}' not running — Watch again to confirm";
-            StatusSubText.ToolTip = StatusSubText.Text;
+            ShowValidationBanner($"'{norm}' is not running — click Watch again to start anyway.");
             return;
         }
 
         try
         {
             _pendingUnrunningWatch = null;
+            ValidationBannerBorder.Visibility = Visibility.Collapsed;
             _engine.StartWatchingProcess(norm);
+            ShowClamshellFailedBannerIfNeeded();
         }
         catch (ArgumentException)
         {
-            StatusSubText.Text = "Enter a process name";
+            ShowValidationBanner("Enter a valid process name.");
         }
     }
+
+    private void ShowClamshellFailedBannerIfNeeded()
+    {
+        if (_engine.GetStatus().ClamshellApplyFailed)
+        {
+            ShowValidationBanner("Could not change OS lid-close action (blocked by Windows/OEM policy). Clamshell is OFF.");
+        }
+    }
+
+    private void CancelPendingSleep_Click(object sender, RoutedEventArgs e) => _engine.CancelPendingSleep();
 
     private async void DisplayOff_Click(object sender, RoutedEventArgs e)
     {
@@ -669,11 +741,21 @@ public partial class MainPopupWindow : Window
         _engine.TurnOffDisplay();
     }
 
-    private void ClamshellSwitch_Click(object sender, RoutedEventArgs e) =>
+    private void ClamshellSwitch_Click(object sender, RoutedEventArgs e)
+    {
         _engine.SetClamshell(ClamshellSwitch.IsChecked == true);
+        SyncFromConfigIfVisible();
+        ShowClamshellFailedBannerIfNeeded();
+    }
 
     private void AgentFocusSwitch_Click(object sender, RoutedEventArgs e) =>
         _engine.SetAgentFocus(AgentFocusSwitch.IsChecked == true);
+
+    private void FocusLidOnlySwitch_Click(object sender, RoutedEventArgs e)
+    {
+        _engine.UpdateConfig(c => c.FocusPauseOnlyWhenLidClosed = FocusLidOnlySwitch.IsChecked == true);
+        _engine.ReapplyAgentFocusIfActive();
+    }
 
     private void EcoQosSwitch_Click(object sender, RoutedEventArgs e)
     {
@@ -723,6 +805,11 @@ public partial class MainPopupWindow : Window
         }
 
         var items = ParseProcessList(CustomAppsBox.Text);
+        if (items.SequenceEqual(_engine.Config.CustomAppsToManage, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
         _engine.UpdateConfig(c => c.CustomAppsToManage = items);
         _engine.ReapplyAgentFocusIfActive();
     }
@@ -780,6 +867,10 @@ public partial class MainPopupWindow : Window
         }
 
         var items = ParseProcessList(CustomWhitelistBox.Text);
+        if (items.SequenceEqual(_engine.Config.CustomAgentWhitelist, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
 
         _engine.UpdateConfig(c => c.CustomAgentWhitelist = items);
         _engine.ReapplyAgentFocusIfActive();
@@ -939,6 +1030,15 @@ public partial class MainPopupWindow : Window
     {
         SaveWebhookUrl();
         var enabled = AlertsSwitch.IsChecked == true;
+        if (enabled && !WebhookPolicy.IsValidWebhookUrl(_engine.Config.AlertWebhookUrl))
+        {
+            AlertsSwitch.IsChecked = false;
+            _alertsExpanded = true;
+            ApplySettingsCardExpansions(_engine.Config);
+            ShowValidationBanner("Enter and save a valid https:// webhook URL first.");
+            return;
+        }
+
         if (enabled)
         {
             _alertsExpanded = true;
@@ -1076,8 +1176,19 @@ public partial class MainPopupWindow : Window
     private async void InstallUpdate_Click(object sender, RoutedEventArgs e) =>
         await StartUpdateInstallAsync();
 
-    private async Task StartUpdateInstallAsync() =>
+    private async Task StartUpdateInstallAsync()
+    {
+        if (_engine.GetStatus().IsActive
+            && (_confirmUpdateUntilUtc is null || DateTimeOffset.UtcNow > _confirmUpdateUntilUtc.Value))
+        {
+            _confirmUpdateUntilUtc = DateTimeOffset.UtcNow.AddSeconds(5);
+            ShowValidationBanner("Session active — installing update will stop it. Click Update again to confirm.");
+            return;
+        }
+
+        _confirmUpdateUntilUtc = null;
         await _updateService.DownloadAndInstallAsync(_prepareForInstallerExit, _finalizeExit);
+    }
 
     private void OnUpdateStateChanged(UpdateUiState state) =>
         Dispatcher.BeginInvoke(() => ApplyUpdateState(state));
@@ -1164,7 +1275,19 @@ public partial class MainPopupWindow : Window
     }
 
     private void Stop_Click(object sender, RoutedEventArgs e) => _engine.Stop(StopReason.Manual);
-    private void Exit_Click(object sender, RoutedEventArgs e) => _exitApp();
+
+    private void Exit_Click(object sender, RoutedEventArgs e)
+    {
+        if (_engine.GetStatus().IsActive
+            && (_confirmExitUntilUtc is null || DateTimeOffset.UtcNow > _confirmExitUntilUtc.Value))
+        {
+            _confirmExitUntilUtc = DateTimeOffset.UtcNow.AddSeconds(5);
+            ShowValidationBanner("Session active — click Power/Quit again within 5s to stop and exit.");
+            return;
+        }
+
+        _exitApp();
+    }
 
     private static string[] SplitTags(string tag) =>
         tag.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

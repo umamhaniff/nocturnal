@@ -207,9 +207,9 @@ public sealed class NocturnalIpcServer : IDisposable
 
             case "extend":
             {
-                if (req.DurationSeconds is not > 0)
+                if (req.DurationSeconds is not > 0 || req.DurationSeconds > IpcCommandParser.MaxDurationSeconds)
                 {
-                    return new IpcResponse(false, "Duration must be positive.");
+                    return new IpcResponse(false, "Duration must be between 1s and 30d.");
                 }
 
                 _engine.AddTime(TimeSpan.FromSeconds(req.DurationSeconds.Value));
@@ -219,13 +219,13 @@ public sealed class NocturnalIpcServer : IDisposable
 
             case "start":
             {
-                if (req.DurationSeconds is not > 0)
+                if (req.DurationSeconds is not > 0 || req.DurationSeconds > IpcCommandParser.MaxDurationSeconds)
                 {
-                    return new IpcResponse(false, "Duration must be positive.");
+                    return new IpcResponse(false, "Duration must be between 1s and 30d.");
                 }
 
-                ApplyOptionalFlags(req);
-                _engine.Start(TimeSpan.FromSeconds(req.DurationSeconds.Value), req.Clamshell);
+                var overrides = BuildOverrides(req);
+                _engine.Start(TimeSpan.FromSeconds(req.DurationSeconds.Value), overrides);
                 _onConfigMutated?.Invoke();
                 var status = BuildStatusPayload();
                 return new IpcResponse(true, $"Awake for {FormatDuration(TimeSpan.FromSeconds(status.RemainingSeconds))}.", status);
@@ -238,15 +238,24 @@ public sealed class NocturnalIpcServer : IDisposable
                     return new IpcResponse(false, "Process name is required.");
                 }
 
-                ApplyOptionalFlags(req);
+                if (req.DurationSeconds is > IpcCommandParser.MaxDurationSeconds)
+                {
+                    return new IpcResponse(false, "Max duration cannot exceed 30d.");
+                }
+
+                var isRunning = _engine.IsProcessCurrentlyRunning(req.WatchProcess, req.WatchPid);
+                var overrides = BuildOverrides(req);
                 TimeSpan? maxDur = req.DurationSeconds is > 0
                     ? TimeSpan.FromSeconds(req.DurationSeconds.Value)
                     : null;
 
-                _engine.StartWatchingProcess(req.WatchProcess, req.WatchPid, maxDur, req.Clamshell);
+                _engine.StartWatchingProcess(req.WatchProcess, req.WatchPid, maxDur, overrides);
                 _onConfigMutated?.Invoke();
                 var status = BuildStatusPayload();
-                return new IpcResponse(true, $"Watching process '{status.WatchProcess}'.", status);
+                var msg = isRunning
+                    ? $"Watching process '{status.WatchProcess}'."
+                    : $"Watching process '{status.WatchProcess}' (not currently running — stops after 15s grace unless started).";
+                return new IpcResponse(true, msg, status);
             }
 
             case "profile":
@@ -280,17 +289,16 @@ public sealed class NocturnalIpcServer : IDisposable
         }
     }
 
-    private void ApplyOptionalFlags(IpcRequest req)
+    private static SessionOverrides? BuildOverrides(IpcRequest req)
     {
-        if (req.AgentFocus is { } focus && _engine.Config.AgentFocusEnabled != focus)
+        if (req.Clamshell is null && req.AgentFocus is null)
         {
-            _engine.SetAgentFocus(focus);
+            return null;
         }
 
-        if (req.Clamshell is { } clamshell && _engine.Config.ClamshellEnabled != clamshell)
-        {
-            _engine.SetClamshell(clamshell);
-        }
+        return new SessionOverrides(
+            ClamshellEnabled: req.Clamshell,
+            AgentFocusEnabled: req.AgentFocus);
     }
 
     private IpcStatusPayload BuildStatusPayload()
@@ -302,14 +310,18 @@ public sealed class NocturnalIpcServer : IDisposable
             RemainingSeconds: Math.Round(st.Remaining.TotalSeconds, 1),
             ExpiresAtUtc: st.ExpiresAtUtc,
             ClamshellEnabled: st.ClamshellEnabled,
-            AgentFocusEnabled: _engine.Config.AgentFocusEnabled,
+            AgentFocusEnabled: st.IsActive ? (st.Focus.IsEngaged || st.FocusArmedForLidClose || _engine.Config.AgentFocusEnabled) : _engine.Config.AgentFocusEnabled,
             ThrottledCount: st.Focus.ThrottledProcessCount,
             PausedCount: st.Focus.PausedProcessCount,
             ReclaimedRamBytes: st.Focus.ReclaimedRamBytes,
             WatchProcess: st.WatchTarget?.ProcessName,
             LastStopReason: st.LastStopReason.ToString(),
             BatteryPercent: snap?.HasBattery == true ? snap.BatteryPercent : null,
-            IsOnAcPower: snap?.IsOnAcPower);
+            IsOnAcPower: snap?.IsOnAcPower,
+            IsLidClosed: st.IsLidClosed,
+            FocusArmedForLidClose: st.FocusArmedForLidClose,
+            ClamshellApplyFailed: st.ClamshellApplyFailed,
+            PendingSleepSeconds: st.PendingSleepSeconds);
     }
 
     private static string FormatDuration(TimeSpan ts)

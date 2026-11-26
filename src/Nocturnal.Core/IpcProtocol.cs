@@ -26,7 +26,11 @@ public sealed record IpcStatusPayload(
     string? WatchProcess,
     string LastStopReason,
     int? BatteryPercent,
-    bool? IsOnAcPower);
+    bool? IsOnAcPower,
+    bool IsLidClosed = false,
+    bool FocusArmedForLidClose = false,
+    bool ClamshellApplyFailed = false,
+    int? PendingSleepSeconds = null);
 
 public sealed record IpcResponse(
     bool Ok,
@@ -36,6 +40,7 @@ public sealed record IpcResponse(
 
 public static class IpcCommandParser
 {
+    public const int MaxDurationSeconds = 30 * 86400;
     private static readonly TimeSpan MaxAllowedDuration = TimeSpan.FromDays(30);
 
     public static bool TryParseDuration(string? token, out TimeSpan duration)
@@ -84,19 +89,26 @@ public static class IpcCommandParser
             i++;
             matchedUnit = true;
 
-            totalSeconds += unit switch
+            double segmentSeconds;
+            switch (unit)
             {
-                'd' => value * 86400.0,
-                'h' => value * 3600.0,
-                'm' => value * 60.0,
-                's' => value,
-                _ => -1.0
-            };
-
-            if (totalSeconds < 0)
-            {
-                return false;
+                case 'd':
+                    segmentSeconds = value * 86400.0;
+                    break;
+                case 'h':
+                    segmentSeconds = value * 3600.0;
+                    break;
+                case 'm':
+                    segmentSeconds = value * 60.0;
+                    break;
+                case 's':
+                    segmentSeconds = value;
+                    break;
+                default:
+                    return false;
             }
+
+            totalSeconds += segmentSeconds;
         }
 
         if (!matchedUnit || totalSeconds <= 0)

@@ -38,14 +38,7 @@ public sealed class WindowsSystemMonitor : ISystemMonitor
         }
 
         var tempC = TryReadAcpiTemperatureCelsius();
-        var thermal = tempC switch
-        {
-            null => ThermalLevel.Unknown,
-            >= 95.0 => ThermalLevel.Critical,
-            >= 85.0 => ThermalLevel.Hot,
-            >= 75.0 => ThermalLevel.Warm,
-            _ => ThermalLevel.Normal
-        };
+        var thermal = tempC.HasValue ? ThermalLevel.Normal : ThermalLevel.Unknown;
 
         return new SystemPowerSnapshot(isOnAc, batteryPercent, hasBattery, thermal, tempC);
     }

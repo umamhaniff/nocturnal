@@ -236,20 +236,29 @@ public sealed class AppUpdateService
 
                 await fileStream.FlushAsync(ct).ConfigureAwait(false);
 
-                if (!string.IsNullOrWhiteSpace(release.ExpectedSha256Hex))
+                if (string.IsNullOrWhiteSpace(release.ExpectedSha256Hex))
                 {
-                    var actualHex = Convert.ToHexString(sha256.GetHashAndReset());
-                    if (!string.Equals(actualHex, release.ExpectedSha256Hex, StringComparison.OrdinalIgnoreCase))
-                    {
-                        SafeDeleteFile(partPath);
-                        SetState(new UpdateUiState(
-                            UpdatePhase.Error,
-                            CurrentVersion,
-                            release,
-                            0.0,
-                            "Installer checksum mismatch"));
-                        return false;
-                    }
+                    SafeDeleteFile(partPath);
+                    SetState(new UpdateUiState(
+                        UpdatePhase.Error,
+                        CurrentVersion,
+                        release,
+                        0.0,
+                        "Missing SHA-256 digest — download manually from GitHub"));
+                    return false;
+                }
+
+                var actualHex = Convert.ToHexString(sha256.GetHashAndReset());
+                if (!string.Equals(actualHex, release.ExpectedSha256Hex, StringComparison.OrdinalIgnoreCase))
+                {
+                    SafeDeleteFile(partPath);
+                    SetState(new UpdateUiState(
+                        UpdatePhase.Error,
+                        CurrentVersion,
+                        release,
+                        0.0,
+                        "Installer checksum mismatch"));
+                    return false;
                 }
             }
 

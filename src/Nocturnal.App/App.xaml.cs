@@ -27,6 +27,8 @@ public partial class App : System.Windows.Application
     private NocturnalIpcServer? _ipcServer;
     private TrayIconService? _trayIcon;
     private MainPopupWindow? _popup;
+    private WindowsLidMonitor? _lidMonitor;
+    private AppLogger? _logger;
     private DispatcherTimer? _timer;
     private DispatcherTimer? _updateTimer;
     private int _tickCount;
@@ -71,7 +73,9 @@ public partial class App : System.Windows.Application
         _updateService = new AppUpdateService();
         _updateService.CleanupStaleUpdateFiles();
 
+        _logger = new AppLogger();
         _alertNotifier = new HttpAlertNotifier();
+        _lidMonitor = new WindowsLidMonitor();
 
         _engine = new SessionEngine(
             new Win32PowerController(),
@@ -83,7 +87,12 @@ public partial class App : System.Windows.Application
             historyStore: new FileSessionHistoryStore(),
             alertNotifier: _alertNotifier,
             networkFailover: new WindowsWifiFailoverController(),
-            recoveryHook: new WindowsRecoveryHook());
+            recoveryHook: new WindowsRecoveryHook(),
+            presenceMonitor: new WindowsUserPresenceMonitor(),
+            logger: _logger);
+
+        _lidMonitor.LidStateChanged += isClosed =>
+            Dispatcher.BeginInvoke(() => _engine?.OnLidStateChanged(isClosed));
 
         // Restore any stale power state from a previous crash, then populate initial telemetry.
         _engine.RecoverIfNeeded();
@@ -95,8 +104,23 @@ public partial class App : System.Windows.Application
         SystemEvents.SessionEnding += OnSessionEnding;
         SessionEnding += (_, _) => ExitApplication();
         Exit += (_, _) => SafeRestoreOnCrash();
-        DispatcherUnhandledException += (_, _) => SafeRestoreOnCrash();
-        AppDomain.CurrentDomain.UnhandledException += (_, _) => SafeRestoreOnCrash();
+        DispatcherUnhandledException += (_, exArgs) =>
+        {
+            _logger?.Error("Unhandled WPF dispatcher exception.", exArgs.Exception);
+            if (exArgs.Exception is OutOfMemoryException or StackOverflowException)
+            {
+                SafeRestoreOnCrash();
+                return;
+            }
+
+            // Keep overnight sessions alive on transient non-fatal UI exceptions.
+            exArgs.Handled = true;
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, exArgs) =>
+        {
+            _logger?.Error("Fatal AppDomain unhandled exception.", exArgs.ExceptionObject as Exception);
+            SafeRestoreOnCrash();
+        };
 
         _popup = new MainPopupWindow(
             _engine,
@@ -133,6 +157,7 @@ public partial class App : System.Windows.Application
             }
             else
             {
+                _engine.CheckPendingSleep();
                 var status = _engine.GetStatus();
                 if (status.IsActive && status.Remaining <= TimeSpan.Zero)
                 {
@@ -215,6 +240,7 @@ public partial class App : System.Windows.Application
         _gracefulExitEvent?.Dispose();
         _timer?.Stop();
         _updateTimer?.Stop();
+        _lidMonitor?.Dispose();
         _ipcServer?.Dispose();
         _engine?.Stop(StopReason.AppExiting);
         _trayIcon?.Dispose();

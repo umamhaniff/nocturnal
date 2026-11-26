@@ -55,6 +55,18 @@ internal static class Program
         Run("SessionEngine_CachesHistoryInMemory_WithoutRepeatedDiskReads", TestSessionHistoryInMemoryCache);
         Run("SessionEngine_AppExitingWhenIdle_IsNoOp", TestAppExitingWhenIdleIsNoOp);
         Run("SessionEngine_ArmsAndClearsRecoveryHook_OnClamshellLifecycle", TestRecoveryHookLifecycle);
+        Run("IpcCommandParser_RejectsMalformedUnitLike1h30x", TestIpcParserRejectsMalformedUnit);
+        Run("ClamshellApplyFailure_DoesNotReportClamshellActive", TestClamshellApplyFailure);
+        Run("CorruptJournal_TriggersDefaultLidActionRecovery", TestCorruptJournalRecovery);
+        Run("StopInternal_ContinuesRestore_EvenIfClamshellRestoreThrows_AndRetries", TestFaultTolerantRestoreAndRetry);
+        Run("AutoSleep_DefersWithCountdown_WhenUserActiveAndLidOpen_AndCancels", TestAutoSleepDefersWhenUserActive);
+        Run("AutoSleep_SleepsImmediately_WhenLidClosed_EvenIfRecentlyActive", TestAutoSleepImmediateWhenLidClosed);
+        Run("ThermalGuard_RespectsConfigWarmAndCriticalThresholds", TestThermalThresholdsHonorConfig);
+        Run("ProfileAndCliOverrides_NeverLeakIntoSavedConfigJson", TestOverridesNeverLeakToConfig);
+        Run("AgentFocus_JournalsSuspendedPid_BeforeSuspendExecutes", TestJournalBeforeSuspendCallback);
+        Run("LidAwareFocus_ArmsWhileLidOpen_PausesOnLidClose_ResumesOnLidOpen", TestLidAwareFocusWorkflow);
+        Run("AppConfig_Normalize_RepairsNullListsAndOutOfRangeValues", TestAppConfigNormalize);
+        Run("NightShift_PersistsLastTriggeredDate_AcrossRestart", TestNightShiftPersistsAcrossRestart);
 
         Console.WriteLine($"\nResults: {_passed} passed, {_failed} failed.");
         return _failed == 0 ? 0 : 1;
@@ -93,18 +105,20 @@ internal static class Program
         TimeSpan? watchGracePeriod = null,
         IAlertNotifier? alertNotifier = null,
         INetworkFailoverController? networkFailover = null,
-        IRecoveryHook? recoveryHook = null)
+        IRecoveryHook? recoveryHook = null,
+        IUserPresenceMonitor? presenceMonitor = null,
+        IConfigStore? configStore = null)
     {
         var callLog = new List<string>();
         var power = new FakePowerController(callLog);
         var monitor = new FakeSystemMonitor();
         var journal = new InMemoryJournalStore(callLog);
-        var config = new InMemoryConfigStore();
+        var config = configStore ?? new InMemoryConfigStore();
         var clock = new FakeClock(new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero));
-        var focus = new FakeAgentFocusController();
+        var focus = new FakeAgentFocusController(callLog);
         var watcher = new FakeProcessWatcher();
         var history = new InMemorySessionHistoryStore();
-        var engine = new SessionEngine(power, monitor, journal, config, clock, focus, watcher, history, watchGracePeriod, alertNotifier, networkFailover, recoveryHook);
+        var engine = new SessionEngine(power, monitor, journal, config, clock, focus, watcher, history, watchGracePeriod, alertNotifier, networkFailover, recoveryHook, presenceMonitor);
         return (engine, power, monitor, journal, clock, focus, watcher, history);
     }
 
@@ -369,7 +383,12 @@ internal static class Program
     private static void TestSessionEngineAgentFocus()
     {
         var (engine, _, _, journal, _, focus) = CreateHarness();
-        engine.UpdateConfig(c => c.AgentFocusEnabled = true);
+        engine.UpdateConfig(c =>
+        {
+            c.AgentFocusEnabled = true;
+            c.FocusSelectedAppMode = SelectedAppMode.DeepPause;
+            c.FocusPauseOnlyWhenLidClosed = false;
+        });
 
         engine.Start(TimeSpan.FromMinutes(30));
         var status = engine.GetStatus();
@@ -379,8 +398,9 @@ internal static class Program
         Assert(status.Focus.PausedProcessCount == 1, "Status should expose paused count");
         Assert(journal.Current?.SuspendedProcesses?.Count == 1, "Journal should persist suspended PIDs for crash recovery");
 
+        var restoreBeforeStop = focus.RestoreCount;
         engine.Stop(StopReason.Manual);
-        Assert(focus.RestoreCount == 1, "Focus should restore on session stop");
+        Assert(focus.RestoreCount == restoreBeforeStop + 1, "Focus should restore on session stop");
         Assert(!engine.GetStatus().Focus.IsEngaged, "Status should clear focus report after stop");
     }
 
@@ -838,7 +858,8 @@ internal static class Program
 
     private static void TestProfileNonDestructiveBaseline()
     {
-        var (engine, _, _, _, _, _, _, _) = CreateFullHarness();
+        var configStore = new InMemoryConfigStore();
+        var (engine, _, _, _, _, _, _, _) = CreateFullHarness(configStore: configStore);
         engine.UpdateConfig(c =>
         {
             c.ClamshellEnabled = true;
@@ -848,12 +869,15 @@ internal static class Program
         });
 
         engine.ApplyProfile("Presentation", startImmediately: true);
-        Assert(!engine.Config.ClamshellEnabled && engine.Config.KeepDisplayAwake && !engine.Config.AutoSleepOnCompletion,
+        var activeStatus = engine.GetStatus();
+        Assert(!activeStatus.ClamshellEnabled && activeStatus.ActiveProfileName == "Presentation",
             "Active profile must apply temporary session flags");
+        Assert(configStore.Load().ClamshellEnabled && !configStore.Load().KeepDisplayAwake,
+            "Applying temporary profile must never mutate stored user config");
 
         engine.Stop(StopReason.Manual);
-        Assert(engine.Config.ClamshellEnabled && !engine.Config.AgentFocusEnabled && !engine.Config.KeepDisplayAwake && engine.Config.AutoSleepOnCompletion,
-            "Stopping a temporary profile session must restore user baseline config");
+        Assert(engine.GetStatus().ClamshellEnabled && engine.Config.ClamshellEnabled && engine.Config.AutoSleepOnCompletion,
+            "Stopping a temporary profile session must preserve user baseline config");
     }
 
     private static void TestCrashRecoveryEnergySaverThreshold()
@@ -930,12 +954,240 @@ internal static class Program
         Assert(!hook.IsArmed, "Normal session stop must disarm recovery hook");
     }
 
+    private static void TestIpcParserRejectsMalformedUnit()
+    {
+        Assert(!IpcCommandParser.TryParseDuration("1h30x", out _), "Malformed unit '1h30x' must be rejected");
+        Assert(!IpcCommandParser.TryParseDuration("15q", out _), "Unknown unit '15q' must be rejected");
+        Assert(IpcCommandParser.TryParseDuration("1h30m", out var valid) && valid == TimeSpan.FromMinutes(90),
+            "Valid composite duration '1h30m' must still parse");
+    }
+
+    private static void TestClamshellApplyFailure()
+    {
+        var (engine, power, _, journal, _, _, _, _) = CreateFullHarness();
+        power.SimulateApplyFailure = true;
+
+        engine.Start(TimeSpan.FromMinutes(30), clamshellOverride: true);
+        var status = engine.GetStatus();
+
+        Assert(!status.ClamshellEnabled, "Status must not claim Clamshell active if Win32 apply/verify failed");
+        Assert(status.ClamshellApplyFailed, "Status must surface ClamshellApplyFailed warning flag");
+        Assert(journal.Current is { ClamshellEnabled: false, LidBackup: null }, "Journal must clear failed clamshell state");
+    }
+
+    private static void TestCorruptJournalRecovery()
+    {
+        var journal = new InMemoryJournalStore { SimulateCorrupt = true };
+        var power = new FakePowerController([]);
+        var engine = new SessionEngine(power, new FakeSystemMonitor(), journal, new InMemoryConfigStore());
+
+        var recovered = engine.RecoverIfNeeded();
+        Assert(recovered, "Corrupt journal must trigger fallback recovery");
+        Assert(power.DefaultLidActionRestored, "Corrupt journal must reset OS lid action back to default Sleep");
+        Assert(engine.GetStatus().LastStopReason == StopReason.CrashRecovery, "Should record CrashRecovery");
+    }
+
+    private static void TestFaultTolerantRestoreAndRetry()
+    {
+        var (engine, power, _, journal, _, focus, _, _) = CreateFullHarness();
+        engine.UpdateConfig(c => c.AgentFocusEnabled = true);
+        engine.Start(TimeSpan.FromMinutes(10));
+        var restoreBeforeStop = focus.RestoreCount;
+
+        power.ThrowOnRestore = true;
+        engine.Stop(StopReason.Manual);
+
+        Assert(focus.RestoreCount == restoreBeforeStop + 1, "Focus restore must still run even if RestoreClamshellMode throws");
+        Assert(journal.Current is not null, "Journal must stay on disk when clamshell restore fails");
+
+        power.ThrowOnRestore = false;
+        engine.Tick();
+        Assert(journal.Current is null, "Next Tick must retry failed clamshell restore and clear journal");
+    }
+
+    private static void TestAutoSleepDefersWhenUserActive()
+    {
+        var presence = new FakeUserPresenceMonitor { IdleDuration = TimeSpan.FromSeconds(10) };
+        var (engine, power, _, _, clock, _, _, _) = CreateFullHarness(presenceMonitor: presence);
+        engine.UpdateConfig(c => c.AutoSleepOnCompletion = true);
+
+        engine.Start(TimeSpan.FromMinutes(5));
+        clock.Advance(TimeSpan.FromMinutes(5));
+        engine.Tick();
+
+        Assert(!power.Slept, "Should defer auto-sleep when lid is open and user is active");
+        Assert(engine.GetStatus().PendingSleepSeconds is > 0 and <= 60, "Should expose 60s countdown");
+
+        engine.CancelPendingSleep();
+        Assert(engine.GetStatus().PendingSleepSeconds is null, "CancelPendingSleep must clear countdown");
+
+        clock.Advance(TimeSpan.FromSeconds(70));
+        engine.CheckPendingSleep();
+        Assert(!power.Slept, "Cancelled sleep must not trigger after 60s");
+    }
+
+    private static void TestAutoSleepImmediateWhenLidClosed()
+    {
+        var presence = new FakeUserPresenceMonitor { IdleDuration = TimeSpan.FromSeconds(5) };
+        var (engine, power, _, _, clock, _, _, _) = CreateFullHarness(presenceMonitor: presence);
+        engine.UpdateConfig(c => c.AutoSleepOnCompletion = true);
+        engine.OnLidStateChanged(true);
+
+        engine.Start(TimeSpan.FromMinutes(5));
+        clock.Advance(TimeSpan.FromMinutes(5));
+        engine.Tick();
+
+        Assert(power.Slept, "Should sleep immediately on completion when lid is closed");
+    }
+
+    private static void TestThermalThresholdsHonorConfig()
+    {
+        var (engine, power, monitor, _, _, _, _, _) = CreateFullHarness();
+        engine.UpdateConfig(c =>
+        {
+            c.EnableThermalProtection = true;
+            c.WarmTempCelsius = 82.0;
+            c.CriticalTempCelsius = 98.0;
+        });
+
+        engine.Start(TimeSpan.FromHours(1));
+        monitor.Snapshot = new SystemPowerSnapshot(true, 100, true, ThermalLevel.Hot, 79.0);
+        engine.Tick();
+        Assert(power.PowerSaverState is not true, "79C must not trigger Warm guard when WarmTempCelsius=82");
+
+        monitor.Snapshot = new SystemPowerSnapshot(true, 100, true, ThermalLevel.Normal, 99.0);
+        engine.Tick();
+        Assert(!engine.GetStatus().IsActive && engine.GetStatus().LastStopReason == StopReason.ThermalCritical,
+            "99C must trigger Critical guard using Config.CriticalTempCelsius");
+    }
+
+    private static void TestOverridesNeverLeakToConfig()
+    {
+        var configStore = new InMemoryConfigStore();
+        var (engine, _, _, _, _, _, _, _) = CreateFullHarness(configStore: configStore);
+        engine.UpdateConfig(c =>
+        {
+            c.ClamshellEnabled = true;
+            c.AgentFocusEnabled = false;
+            c.WarmTempCelsius = 80.0;
+        });
+
+        engine.ApplyProfile("AI Overnight", startImmediately: true);
+        // Updating an unrelated setting during active profile must NOT leak AgentFocus=true to config.json.
+        engine.UpdateConfig(c => c.WarmTempCelsius = 82.0);
+        Assert(!configStore.Load().AgentFocusEnabled, "UpdateConfig during profile must not leak profile overrides to disk");
+
+        engine.Start(TimeSpan.FromMinutes(10), new SessionOverrides(ClamshellEnabled: false, AgentFocusEnabled: true));
+        Assert(!configStore.Load().AgentFocusEnabled && configStore.Load().ClamshellEnabled,
+            "CLI/session overrides must stay isolated from saved config");
+    }
+
+    private static void TestJournalBeforeSuspendCallback()
+    {
+        var callLog = new List<string>();
+        var power = new FakePowerController(callLog);
+        var monitor = new FakeSystemMonitor();
+        var journal = new InMemoryJournalStore(callLog);
+        var focus = new FakeAgentFocusController(callLog);
+        var engine = new SessionEngine(power, monitor, journal, new InMemoryConfigStore(), focusController: focus);
+
+        engine.UpdateConfig(c => c.AgentFocusEnabled = true);
+        engine.Start(TimeSpan.FromMinutes(20));
+
+        var saveIdx = callLog.IndexOf("Journal.Save");
+        var callbackIdx = callLog.IndexOf("Focus.AboutToSuspendCallback");
+        var engageIdx = callLog.IndexOf("Focus.EngageBeforeSuspend");
+        Assert(saveIdx >= 0 && callbackIdx >= 0 && engageIdx >= 0, "Expected journal save and focus suspend trace entries");
+        Assert(callbackIdx < engageIdx, "Journal suspend callback must run BEFORE NtSuspendProcess engage completes");
+    }
+
+    private static void TestLidAwareFocusWorkflow()
+    {
+        var (engine, _, _, _, _, focus, _, _) = CreateFullHarness();
+        engine.UpdateConfig(c =>
+        {
+            c.AgentFocusEnabled = true;
+            c.FocusSelectedAppMode = SelectedAppMode.DeepPause;
+            c.FocusPauseOnlyWhenLidClosed = true;
+        });
+
+        engine.Start(TimeSpan.FromMinutes(30));
+        Assert(engine.GetStatus().FocusArmedForLidClose, "While lid is open, DeepPause should arm rather than pause immediately");
+        Assert(focus.LastEngagedMode == SelectedAppMode.Off, "Selected apps must not be paused while lid is open");
+
+        engine.OnLidStateChanged(true);
+        Assert(!engine.GetStatus().FocusArmedForLidClose, "Closing lid must transition Focus from armed to active DeepPause");
+        Assert(focus.LastEngagedMode == SelectedAppMode.DeepPause, "Closing lid must engage DeepPause on selected apps");
+
+        engine.OnLidStateChanged(false);
+        Assert(engine.GetStatus().FocusArmedForLidClose, "Opening lid must re-arm and restore selected apps immediately");
+        Assert(focus.LastEngagedMode == SelectedAppMode.Off, "Opening lid must turn off DeepPause immediately");
+    }
+
+    private static void TestAppConfigNormalize()
+    {
+        var malformed = new AppConfig
+        {
+            FocusAppsToClose = null!,
+            CustomAppsToManage = null!,
+            CustomAgentWhitelist = null!,
+            LowPowerBatteryThresholdPercent = 15,
+            CriticalBatteryPercent = 25,
+            WarmTempCelsius = 90,
+            CriticalTempCelsius = 85,
+            NightShiftDurationMinutes = -5
+        };
+
+        malformed.Normalize();
+        Assert(malformed.FocusAppsToClose.Count > 0 && malformed.CustomAppsToManage is not null && malformed.CustomAgentWhitelist is not null,
+            "Normalize must repair null process lists");
+        Assert(malformed.CriticalBatteryPercent < malformed.LowPowerBatteryThresholdPercent,
+            "Normalize must clamp CriticalBatteryPercent below LowPowerThreshold");
+        Assert(malformed.CriticalTempCelsius > malformed.WarmTempCelsius,
+            "Normalize must enforce CriticalTempCelsius above WarmTempCelsius");
+        Assert(malformed.NightShiftDurationMinutes >= 5, "Normalize must clamp NightShiftDurationMinutes >= 5");
+    }
+
+    private static void TestNightShiftPersistsAcrossRestart()
+    {
+        var configStore = new InMemoryConfigStore();
+        var (engine1, _, monitor, _, clock, _, _, _) = CreateFullHarness(configStore: configStore);
+        var utcFor2201Plus7 = new DateTimeOffset(2026, 11, 26, 22, 1, 0, TimeSpan.FromHours(7)).ToUniversalTime();
+        clock.Advance(utcFor2201Plus7 - clock.UtcNow);
+        monitor.Snapshot = new SystemPowerSnapshot(true, 100, true, ThermalLevel.Normal, 45.0);
+
+        engine1.UpdateConfig(c =>
+        {
+            c.NightShiftEnabled = true;
+            c.NightShiftStartTime = "22:00";
+            c.NightShiftDurationMinutes = 120;
+            c.NightShiftRequireAcPower = true;
+        });
+        engine1.Tick();
+        engine1.Stop(StopReason.Manual);
+
+        // Simulate app restart 1 minute later still inside the 5-minute window.
+        clock.Advance(TimeSpan.FromMinutes(1));
+        var engine2 = new SessionEngine(
+            new FakePowerController([]),
+            monitor,
+            new InMemoryJournalStore(),
+            configStore,
+            clock);
+        engine2.Tick();
+
+        Assert(!engine2.GetStatus().IsActive, "Restarted app must not re-trigger Night Shift on same calendar date");
+    }
+
     private sealed class FakePowerController(List<string> callLog) : IPowerController
     {
         public List<string> CallLog { get; } = callLog;
         public bool AwakeEnabled { get; private set; }
         public bool LastKeepDisplayAwake { get; private set; }
         public bool ClamshellActive { get; private set; }
+        public bool SimulateApplyFailure { get; set; }
+        public bool ThrowOnRestore { get; set; }
+        public bool DefaultLidActionRestored { get; private set; }
         public LidActionBackup? RestoredBackup { get; private set; }
         public bool? PowerSaverState { get; private set; }
         public int? EnergySaverThreshold { get; set; } = 35;
@@ -958,16 +1210,32 @@ internal static class Program
             return new LidActionBackup(Guid.NewGuid(), 1, 1);
         }
 
-        public void ApplyClamshellMode(Guid schemeGuid)
+        public bool ApplyClamshellMode(Guid schemeGuid)
         {
             CallLog.Add("Power.ApplyClamshellMode");
+            if (SimulateApplyFailure)
+            {
+                return false;
+            }
             ClamshellActive = true;
+            return true;
         }
 
-        public void RestoreClamshellMode(LidActionBackup backup)
+        public bool RestoreClamshellMode(LidActionBackup backup)
         {
+            if (ThrowOnRestore)
+            {
+                throw new InvalidOperationException("Simulated Win32 restore error");
+            }
             ClamshellActive = false;
             RestoredBackup = backup;
+            return true;
+        }
+
+        public bool RestoreDefaultLidAction()
+        {
+            DefaultLidActionRestored = true;
+            return true;
         }
 
         public int? ReadEnergySaverThreshold() => EnergySaverThreshold;
@@ -998,12 +1266,27 @@ internal static class Program
     private sealed class InMemoryJournalStore(List<string>? callLog = null) : IJournalStore
     {
         public JournalEntry? Current { get; private set; }
-        public JournalEntry? Load() => Current;
+        public bool SimulateCorrupt { get; set; }
+        public bool WasLastLoadCorrupt { get; private set; }
+
+        public JournalEntry? Load()
+        {
+            if (SimulateCorrupt)
+            {
+                WasLastLoadCorrupt = true;
+                SimulateCorrupt = false;
+                return null;
+            }
+            WasLastLoadCorrupt = false;
+            return Current;
+        }
+
         public void Save(JournalEntry entry)
         {
             callLog?.Add("Journal.Save");
             Current = entry;
         }
+
         public void Clear() => Current = null;
     }
 
@@ -1020,16 +1303,25 @@ internal static class Program
         public void Advance(TimeSpan delta) => UtcNow = UtcNow.Add(delta);
     }
 
-    private sealed class FakeAgentFocusController : IAgentFocusController
+    private sealed class FakeAgentFocusController(List<string>? callLog = null) : IAgentFocusController
     {
         public int EngageCount { get; private set; }
         public int RestoreCount { get; private set; }
+        public SelectedAppMode LastEngagedMode { get; private set; } = SelectedAppMode.Off;
         public List<SuspendedProcessRecord> RecoveredRecords { get; } = [];
 
-        public FocusReport Engage(AppConfig config)
+        public FocusReport Engage(AppConfig config, Action<SuspendedProcessRecord>? onAboutToSuspend = null)
         {
             EngageCount++;
-            return new FocusReport(true, 4, 1, 0, ["Discord"], 64 * 1024 * 1024);
+            LastEngagedMode = config.FocusSelectedAppMode;
+            var rec = new SuspendedProcessRecord(1234, new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero));
+            if (onAboutToSuspend is not null)
+            {
+                callLog?.Add("Focus.AboutToSuspendCallback");
+                onAboutToSuspend(rec);
+            }
+            callLog?.Add("Focus.EngageBeforeSuspend");
+            return new FocusReport(true, 4, config.FocusSelectedAppMode == SelectedAppMode.DeepPause ? 1 : 0, 0, ["Discord"], 64 * 1024 * 1024);
         }
 
         public IReadOnlyList<SuspendedProcessRecord> GetSuspendedProcesses() =>
@@ -1039,6 +1331,12 @@ internal static class Program
 
         public void RecoverSuspended(IReadOnlyList<SuspendedProcessRecord> records) =>
             RecoveredRecords.AddRange(records);
+    }
+
+    private sealed class FakeUserPresenceMonitor : IUserPresenceMonitor
+    {
+        public TimeSpan IdleDuration { get; set; } = TimeSpan.FromHours(1);
+        public TimeSpan GetIdleDuration() => IdleDuration;
     }
 
     private sealed class FakeProcessWatcher : IProcessWatcher

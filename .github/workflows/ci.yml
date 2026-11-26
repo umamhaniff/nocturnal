@@ -1,0 +1,30 @@
+name: Nocturnal CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  core-tests-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Run Nocturnal.Core tests
+        run: dotnet run --project tests/Nocturnal.Tests -c Release
+
+  windows-build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Build solution
+        run: dotnet build Nocturnal.sln -c Release --no-restore || dotnet build Nocturnal.sln -c Release
+      - name: Run unit tests
+        run: dotnet run --project tests/Nocturnal.Tests -c Release

@@ -129,6 +129,17 @@ public static class ProcessFocusPolicy
         "mstsc",
         "wireguard",
         "openvpn",
+        "zerotier-one",
+        "warp-svc",
+        "Cloudflare WARP",
+        "sunshine",
+        "Moonlight",
+        "nxnode",
+        "nxserver",
+        "v2rayN",
+        "clash",
+        "clash-verge",
+        "ngrok",
         "AdGuardHome"
     };
 
