@@ -38,6 +38,16 @@ internal static class Program
         Run("IpcCommandParser_ParsesStartExtendWatchAndFlags", TestIpcCommandParserValid);
         Run("IpcCommandParser_RejectsInvalidDurationsAndUnknownFlags", TestIpcCommandParserInvalid);
         Run("IpcProtocol_SerializesStatusAndHistoryPayloadsCleanly", TestIpcProtocolJsonRoundTrip);
+        Run("WebhookPolicy_ValidatesHttps_DetectsProviders_AndBuildsPayloads", TestWebhookPolicyValidationAndPayloads);
+        Run("SessionEngine_DispatchesAlerts_OnSafetyGuardAndCompletion", TestSessionEngineWebhookAlerts);
+        Run("NetworkFailoverPolicy_SanitizesSsids_DebouncesAndEnforcesCooldown", TestNetworkFailoverPolicy);
+        Run("SessionEngine_WifiFailover_TriggersAfterOfflineThreshold", TestSessionEngineWifiFailover);
+        Run("SchedulePolicy_NightShift_TriggersOncePerDayWithinWindowOnAc", TestNightShiftScheduleTrigger);
+        Run("SessionEngine_NightShift_AutoStartsInTick_AndAppliesProfile", TestSessionEngineNightShiftAndProfile);
+        Run("IpcCommandParser_ParsesProfileAndMultiWordNames", TestIpcCommandParserProfile);
+        Run("FocusPolicy_IsDefaultProtected_FlagsSystemAndAgentsOnly", TestFocusPolicyDefaultProtectedHelper);
+        Run("AppConfig_BackwardCompatible_DeserializesOlderJsonCleanly", TestAppConfigBackwardCompatibility);
+        Run("SchedulePolicy_FindProfile_SupportsExactAndAliases", TestScheduleProfileLookup);
 
         Console.WriteLine($"\nResults: {_passed} passed, {_failed} failed.");
         return _failed == 0 ? 0 : 1;
@@ -72,7 +82,10 @@ internal static class Program
         return (engine, power, monitor, journal, clock, focus);
     }
 
-    private static (SessionEngine engine, FakePowerController power, FakeSystemMonitor monitor, InMemoryJournalStore journal, FakeClock clock, FakeAgentFocusController focus, FakeProcessWatcher watcher, InMemorySessionHistoryStore history) CreateFullHarness(TimeSpan? watchGracePeriod = null)
+    private static (SessionEngine engine, FakePowerController power, FakeSystemMonitor monitor, InMemoryJournalStore journal, FakeClock clock, FakeAgentFocusController focus, FakeProcessWatcher watcher, InMemorySessionHistoryStore history) CreateFullHarness(
+        TimeSpan? watchGracePeriod = null,
+        IAlertNotifier? alertNotifier = null,
+        INetworkFailoverController? networkFailover = null)
     {
         var callLog = new List<string>();
         var power = new FakePowerController(callLog);
@@ -83,7 +96,7 @@ internal static class Program
         var focus = new FakeAgentFocusController();
         var watcher = new FakeProcessWatcher();
         var history = new InMemorySessionHistoryStore();
-        var engine = new SessionEngine(power, monitor, journal, config, clock, focus, watcher, history, watchGracePeriod);
+        var engine = new SessionEngine(power, monitor, journal, config, clock, focus, watcher, history, watchGracePeriod, alertNotifier, networkFailover);
         return (engine, power, monitor, journal, clock, focus, watcher, history);
     }
 
@@ -642,6 +655,153 @@ internal static class Program
         Assert(roundTrip is { Ok: true, Status.WatchProcess: "python", History.Count: 1 }, "IPC response should round-trip cleanly");
     }
 
+    private static void TestWebhookPolicyValidationAndPayloads()
+    {
+        Assert(!WebhookPolicy.IsValidWebhookUrl("http://discord.com/api/webhooks/1/2"), "HTTP URLs must be rejected");
+        Assert(!WebhookPolicy.IsValidWebhookUrl("https://localhost:8080/hook"), "Loopback host must be rejected");
+        Assert(!WebhookPolicy.IsValidWebhookUrl("https://127.0.0.1/hook"), "Loopback IP must be rejected");
+
+        const string discordUrl = "https://discord.com/api/webhooks/123/abc";
+        const string telegramUrl = "https://api.telegram.org/botTOKEN/sendMessage?chat_id=98765";
+        Assert(WebhookPolicy.DetectProvider(discordUrl) == WebhookProvider.Discord, "Should detect Discord");
+        Assert(WebhookPolicy.DetectProvider(telegramUrl) == WebhookProvider.Telegram, "Should detect Telegram");
+
+        var evt = new WebhookAlertEvent("TimerExpired", "Session Completed", "Done", DateTimeOffset.UtcNow, 80, 128.5);
+        Assert(WebhookPolicy.BuildJsonPayload(evt, discordUrl).Contains("\"content\":"), "Discord payload requires content key");
+        var tgPayload = WebhookPolicy.BuildJsonPayload(evt, telegramUrl);
+        Assert(tgPayload.Contains("\"chat_id\":\"98765\"") && tgPayload.Contains("\"text\":"), "Telegram payload requires chat_id and text");
+    }
+
+    private static void TestSessionEngineWebhookAlerts()
+    {
+        var alerts = new FakeAlertNotifier();
+        var (engine, _, monitor, _, clock, _, _, _) = CreateFullHarness(alertNotifier: alerts);
+        engine.UpdateConfig(c =>
+        {
+            c.AlertsEnabled = true;
+            c.AlertWebhookUrl = "https://discord.com/api/webhooks/1/2";
+            c.AlertOnCompletion = true;
+            c.AlertOnSafetyGuard = true;
+        });
+
+        engine.Start(TimeSpan.FromMinutes(10));
+        clock.Advance(TimeSpan.FromMinutes(10));
+        engine.Tick();
+        Assert(alerts.Events.Count == 1 && alerts.Events[0].EventType == "TimerExpired", "Completion alert should fire once");
+
+        engine.Start(TimeSpan.FromMinutes(30));
+        monitor.Snapshot = new SystemPowerSnapshot(false, 9, true, ThermalLevel.Normal, 45.0);
+        engine.Tick();
+        Assert(alerts.Events.Count == 2 && alerts.Events[1].EventType == "BatteryCritical", "Critical battery alert should fire");
+    }
+
+    private static void TestNetworkFailoverPolicy()
+    {
+        Assert(NetworkFailoverPolicy.IsValidSsid("My-Phone_5G"), "Valid hotspot SSID should pass");
+        Assert(!NetworkFailoverPolicy.IsValidSsid("bad&cmd"), "Shell metacharacter SSID must be rejected");
+        Assert(!NetworkFailoverPolicy.IsValidSsid("too\"quote"), "Quoted SSID must be rejected");
+        Assert(!NetworkFailoverPolicy.IsValidSsid(new string('A', 33)), "Over-32-char SSID must be rejected");
+
+        var now = DateTimeOffset.UtcNow;
+        var offlineCount = 0;
+        DateTimeOffset? lastAttempt = null;
+        Assert(!NetworkFailoverPolicy.ShouldAttemptFailover(false, ref offlineCount, now, lastAttempt), "First offline tick must debounce");
+        Assert(NetworkFailoverPolicy.ShouldAttemptFailover(false, ref offlineCount, now.AddSeconds(10), lastAttempt), "Second offline tick should trigger failover");
+        lastAttempt = now.AddSeconds(10);
+        Assert(!NetworkFailoverPolicy.ShouldAttemptFailover(false, ref offlineCount, now.AddSeconds(30), lastAttempt), "Cooldown must suppress immediate retry");
+        Assert(!NetworkFailoverPolicy.ShouldAttemptFailover(true, ref offlineCount, now.AddSeconds(40), lastAttempt) && offlineCount == 0, "Online resets counter");
+    }
+
+    private static void TestSessionEngineWifiFailover()
+    {
+        var wifi = new FakeNetworkFailoverController { Online = false, ConnectResult = true };
+        var (engine, _, _, _, _, _, _, _) = CreateFullHarness(networkFailover: wifi);
+        engine.UpdateConfig(c =>
+        {
+            c.WifiFailoverEnabled = true;
+            c.BackupWifiSsid = "HansHotspot";
+        });
+
+        engine.Start(TimeSpan.FromMinutes(30));
+        engine.Tick();
+        Assert(wifi.ConnectCalls.Count == 0, "Single offline tick should not trigger Wi-Fi switch");
+
+        engine.Tick();
+        Assert(wifi.ConnectCalls.Count == 1 && wifi.ConnectCalls[0] == "HansHotspot", "Second consecutive offline tick should switch to backup SSID");
+        Assert(engine.GetStatus().WifiFailoverTriggered, "Status should reflect triggered Wi-Fi failover");
+    }
+
+    private static void TestNightShiftScheduleTrigger()
+    {
+        var cfg = new AppConfig
+        {
+            NightShiftEnabled = true,
+            NightShiftStartTime = "22:00",
+            NightShiftDurationMinutes = 240,
+            NightShiftRequireAcPower = true
+        };
+        var local2202 = new DateTimeOffset(2026, 11, 26, 22, 2, 0, TimeSpan.FromHours(7));
+        var today = DateOnly.FromDateTime(local2202.DateTime);
+
+        Assert(!SchedulePolicy.ShouldTriggerNightShift(cfg, local2202, isSessionActive: false, isOnAcPower: false, null), "Require AC must block trigger on battery");
+        Assert(SchedulePolicy.ShouldTriggerNightShift(cfg, local2202, isSessionActive: false, isOnAcPower: true, null), "Should trigger inside 5m window on AC");
+        Assert(!SchedulePolicy.ShouldTriggerNightShift(cfg, local2202, isSessionActive: false, isOnAcPower: true, today), "Must not trigger twice on same local date");
+    }
+
+    private static void TestSessionEngineNightShiftAndProfile()
+    {
+        var (engine, _, monitor, _, clock, _, _, _) = CreateFullHarness();
+        var utcFor2201Plus7 = new DateTimeOffset(2026, 11, 26, 22, 1, 0, TimeSpan.FromHours(7)).ToUniversalTime();
+        clock.Advance(utcFor2201Plus7 - clock.UtcNow);
+        monitor.Snapshot = new SystemPowerSnapshot(true, 100, true, ThermalLevel.Normal, 45.0);
+
+        engine.UpdateConfig(c =>
+        {
+            c.NightShiftEnabled = true;
+            c.NightShiftStartTime = "22:00";
+            c.NightShiftDurationMinutes = 180;
+            c.NightShiftRequireAcPower = true;
+            c.NightShiftProfileName = "AI Overnight";
+        });
+
+        engine.Tick();
+        var st = engine.GetStatus();
+        Assert(st.IsActive && st.ActiveProfileName == "AI Overnight", "Night Shift tick should start AI Overnight profile");
+        Assert(Math.Abs(st.TotalDuration.TotalMinutes - 180) < 0.1, "Night Shift should honor configured duration");
+    }
+
+    private static void TestIpcCommandParserProfile()
+    {
+        Assert(IpcCommandParser.TryParseArgs(["profile", "AI", "Overnight"], out var req1, out _)
+            && req1 is { Action: "profile", ProfileName: "AI Overnight" }, "Should parse multi-word profile name");
+        Assert(IpcCommandParser.TryParseArgs(["profile", "present"], out var req2, out _)
+            && req2 is { Action: "profile", ProfileName: "present" }, "Should accept profile alias");
+        Assert(!IpcCommandParser.TryParseArgs(["profile", "nonexistent"], out _, out _), "Should reject unknown profile");
+    }
+
+    private static void TestFocusPolicyDefaultProtectedHelper()
+    {
+        Assert(ProcessFocusPolicy.IsDefaultProtected("agy", null), "AI agent root must be protected");
+        Assert(ProcessFocusPolicy.IsDefaultProtected("svchost", @"C:\Windows\System32\svchost.exe"), "System path must be protected");
+        Assert(!ProcessFocusPolicy.IsDefaultProtected("Spotify", @"C:\Users\dev\AppData\Roaming\Spotify\Spotify.exe"), "User app must not be protected by default");
+    }
+
+    private static void TestAppConfigBackwardCompatibility()
+    {
+        const string legacyJson = """{"UiStyle":3,"ClamshellEnabled":true,"CriticalBatteryPercent":20}""";
+        var cfg = JsonSerializer.Deserialize<AppConfig>(legacyJson);
+        Assert(cfg is not null && cfg.UiStyle == TrayUiStyle.Popover && !cfg.AlertsEnabled && cfg.NightShiftDurationMinutes == 240,
+            "Legacy v1.0 config JSON must deserialize cleanly with new v1.3 defaults");
+    }
+
+    private static void TestScheduleProfileLookup()
+    {
+        var ai = SchedulePolicy.FindProfile("ai");
+        var pres = SchedulePolicy.FindProfile("Presentation");
+        Assert(ai is { Name: "AI Overnight", SelectedAppMode: SelectedAppMode.DeepPause }, "AI alias should match AI Overnight");
+        Assert(pres is { Name: "Presentation", KeepDisplayAwake: true, ClamshellEnabled: false }, "Presentation should keep display awake without clamshell");
+    }
+
     private sealed class FakePowerController(List<string> callLog) : IPowerController
     {
         public List<string> CallLog { get; } = callLog;
@@ -749,6 +909,26 @@ internal static class Program
     {
         public bool IsRunning { get; set; } = true;
         public bool IsProcessRunning(ProcessWatchTarget target) => IsRunning;
+        public IReadOnlyList<RunningAppInfo> ListRunningSessionApps() => [];
+    }
+
+    private sealed class FakeAlertNotifier : IAlertNotifier
+    {
+        public List<WebhookAlertEvent> Events { get; } = [];
+        public void Notify(AppConfig config, WebhookAlertEvent alert) => Events.Add(alert);
+    }
+
+    private sealed class FakeNetworkFailoverController : INetworkFailoverController
+    {
+        public bool Online { get; set; } = true;
+        public bool ConnectResult { get; set; } = true;
+        public List<string> ConnectCalls { get; } = [];
+        public bool HasInternetConnectivity() => Online;
+        public bool TryConnectToProfile(string ssid)
+        {
+            ConnectCalls.Add(ssid);
+            return ConnectResult;
+        }
     }
 
     private sealed class InMemorySessionHistoryStore : ISessionHistoryStore

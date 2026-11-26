@@ -142,6 +142,15 @@ public static class ProcessFocusPolicy
         return trimmed;
     }
 
+    public static bool IsDefaultProtected(string processName, string? imagePath)
+    {
+        var norm = NormalizeProcessName(processName);
+        return string.IsNullOrEmpty(norm)
+            || IsProtectedSystemPath(imagePath)
+            || ShellLaunchers.Contains(norm)
+            || ProtectedRootNames.Contains(norm);
+    }
+
     public static bool IsProtectedSystemPath(string? imagePath)
     {
         if (string.IsNullOrWhiteSpace(imagePath))

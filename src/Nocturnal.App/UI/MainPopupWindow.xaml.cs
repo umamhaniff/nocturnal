@@ -23,11 +23,13 @@ public partial class MainPopupWindow : Window
 
     private readonly SessionEngine _engine;
     private readonly AppUpdateService _updateService;
+    private readonly HttpAlertNotifier _alertNotifier;
     private readonly Action _exitApp;
     private readonly Action _prepareForInstallerExit;
     private readonly Action _finalizeExit;
     private bool _isInitializing = true;
     private bool _allowClose;
+    private bool _suppressDeactivateHide;
 
     private static SolidColorBrush CreateFrozenBrush(byte r, byte g, byte b)
     {
@@ -39,12 +41,14 @@ public partial class MainPopupWindow : Window
     public MainPopupWindow(
         SessionEngine engine,
         AppUpdateService updateService,
+        HttpAlertNotifier alertNotifier,
         Action exitApp,
         Action prepareForInstallerExit,
         Action finalizeExit)
     {
         _engine = engine;
         _updateService = updateService;
+        _alertNotifier = alertNotifier;
         _exitApp = exitApp;
         _prepareForInstallerExit = prepareForInstallerExit;
         _finalizeExit = finalizeExit;
@@ -136,7 +140,9 @@ public partial class MainPopupWindow : Window
             StatusTitleText.Text = FormatRemaining(status.Remaining);
             StatusSubText.Text = status.WatchTarget is { } watch
                 ? $"Watching: {watch.ProcessName} (max {status.ExpiresAtUtc?.ToLocalTime():HH:mm})"
-                : $"Ends {status.ExpiresAtUtc?.ToLocalTime():HH:mm}";
+                : status.ActiveProfileName is { } profName
+                    ? $"{profName} • Ends {status.ExpiresAtUtc?.ToLocalTime():HH:mm}"
+                    : $"Ends {status.ExpiresAtUtc?.ToLocalTime():HH:mm}";
             UpdateRingArc(1.0 - status.Progress);
             StopButton.Visibility = Visibility.Visible;
         }
@@ -175,7 +181,8 @@ public partial class MainPopupWindow : Window
             var temp = snapshot.TemperatureCelsius.HasValue
                 ? $"{snapshot.TemperatureCelsius:F0}°C"
                 : "Thermal N/A";
-            TelemetryText.Text = $"{powerSource} • {batt} • {temp}";
+            var wifiTag = status.WifiFailoverTriggered ? " • Backup Wi-Fi" : "";
+            TelemetryText.Text = $"{powerSource} • {batt} • {temp}{wifiTag}";
         }
     }
 
@@ -320,6 +327,26 @@ public partial class MainPopupWindow : Window
         CustomAppsBox.Text = string.Join(", ", cfg.CustomAppsToManage);
         CustomWhitelistBox.Text = string.Join(", ", cfg.CustomAgentWhitelist);
 
+        NightShiftSwitch.IsChecked = cfg.NightShiftEnabled;
+        NightShiftTimeBox.Text = cfg.NightShiftStartTime;
+        NightShiftDurationBox.Text = cfg.NightShiftDurationMinutes.ToString();
+        NightShiftAcSwitch.IsChecked = cfg.NightShiftRequireAcPower;
+        NsAiRadio.IsChecked = string.Equals(cfg.NightShiftProfileName, "AI Overnight", StringComparison.OrdinalIgnoreCase);
+        NsBuildRadio.IsChecked = string.Equals(cfg.NightShiftProfileName, "Build / Scraper", StringComparison.OrdinalIgnoreCase);
+        NsPresentRadio.IsChecked = string.Equals(cfg.NightShiftProfileName, "Presentation", StringComparison.OrdinalIgnoreCase);
+        if (NsAiRadio.IsChecked != true && NsBuildRadio.IsChecked != true && NsPresentRadio.IsChecked != true)
+        {
+            NsAiRadio.IsChecked = true;
+        }
+
+        WifiFailoverSwitch.IsChecked = cfg.WifiFailoverEnabled;
+        BackupSsidBox.Text = cfg.BackupWifiSsid;
+
+        AlertsSwitch.IsChecked = cfg.AlertsEnabled;
+        WebhookUrlBox.Text = cfg.AlertWebhookUrl;
+        AlertOnCompletionCheck.IsChecked = cfg.AlertOnCompletion;
+        AlertOnGuardCheck.IsChecked = cfg.AlertOnSafetyGuard;
+
         SyncAppChips(cfg);
         SyncStyleRadios(cfg.UiStyle);
         ApplyUiStyleLayout(cfg.UiStyle);
@@ -393,6 +420,11 @@ public partial class MainPopupWindow : Window
 
     private void Window_Deactivated(object? sender, EventArgs e)
     {
+        if (_suppressDeactivateHide)
+        {
+            return;
+        }
+
         if (IsVisible)
         {
             Hide();
@@ -418,6 +450,24 @@ public partial class MainPopupWindow : Window
     private void Preset1h_Click(object sender, RoutedEventArgs e) => _engine.AddTime(TimeSpan.FromHours(1));
     private void Preset4h_Click(object sender, RoutedEventArgs e) => _engine.AddTime(TimeSpan.FromHours(4));
 
+    private void ProfileAi_Click(object sender, RoutedEventArgs e)
+    {
+        _engine.ApplyProfile("AI Overnight", startImmediately: true);
+        SyncFromConfig();
+    }
+
+    private void ProfileBuild_Click(object sender, RoutedEventArgs e)
+    {
+        _engine.ApplyProfile("Build / Scraper", startImmediately: true);
+        SyncFromConfig();
+    }
+
+    private void ProfilePresent_Click(object sender, RoutedEventArgs e)
+    {
+        _engine.ApplyProfile("Presentation", startImmediately: true);
+        SyncFromConfig();
+    }
+
     private void StartCustom_Click(object sender, RoutedEventArgs e)
     {
         _ = int.TryParse(DaysBox.Text, out var days);
@@ -436,6 +486,60 @@ public partial class MainPopupWindow : Window
     }
 
     private void WatchProcess_Click(object sender, RoutedEventArgs e) => StartWatchFromInput();
+
+    private void PickWatchProcess_Click(object sender, RoutedEventArgs e)
+    {
+        if (PickProcessName() is { } picked)
+        {
+            WatchProcessBox.Text = picked;
+        }
+    }
+
+    private void PickExtraApp_Click(object sender, RoutedEventArgs e)
+    {
+        if (PickProcessName() is { } picked)
+        {
+            var items = ParseProcessList(CustomAppsBox.Text);
+            if (!items.Contains(picked, StringComparer.OrdinalIgnoreCase))
+            {
+                items.Add(picked);
+                CustomAppsBox.Text = string.Join(", ", items);
+                _engine.UpdateConfig(c => c.CustomAppsToManage = items);
+                _engine.ReapplyAgentFocusIfActive();
+            }
+        }
+    }
+
+    private void PickWhitelistApp_Click(object sender, RoutedEventArgs e)
+    {
+        if (PickProcessName() is { } picked)
+        {
+            var items = ParseProcessList(CustomWhitelistBox.Text);
+            if (!items.Contains(picked, StringComparer.OrdinalIgnoreCase))
+            {
+                items.Add(picked);
+                CustomWhitelistBox.Text = string.Join(", ", items);
+                _engine.UpdateConfig(c => c.CustomAgentWhitelist = items);
+                _engine.ReapplyAgentFocusIfActive();
+            }
+        }
+    }
+
+    private string? PickProcessName()
+    {
+        _suppressDeactivateHide = true;
+        try
+        {
+            var apps = _engine.ListRunningSessionApps();
+            var picker = new AppPickerWindow(apps) { Owner = this };
+            return picker.ShowDialog() == true ? picker.SelectedProcessName : null;
+        }
+        finally
+        {
+            _suppressDeactivateHide = false;
+            Activate();
+        }
+    }
 
     private void WatchProcessBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
@@ -624,6 +728,123 @@ public partial class MainPopupWindow : Window
         var enabled = StartupSwitch.IsChecked == true;
         _engine.UpdateConfig(c => c.LaunchAtStartup = enabled);
         StartupManager.SetLaunchAtStartup(enabled);
+    }
+
+    private void NightShiftSwitch_Click(object sender, RoutedEventArgs e) =>
+        _engine.UpdateConfig(c => c.NightShiftEnabled = NightShiftSwitch.IsChecked == true);
+
+    private void NightShiftAcSwitch_Click(object sender, RoutedEventArgs e) =>
+        _engine.UpdateConfig(c => c.NightShiftRequireAcPower = NightShiftAcSwitch.IsChecked == true);
+
+    private void NightShiftBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        var timeText = SchedulePolicy.TryParseTimeOfDay(NightShiftTimeBox.Text, out var parsed)
+            ? $"{(int)parsed.TotalHours:D2}:{parsed.Minutes:D2}"
+            : _engine.Config.NightShiftStartTime;
+        var mins = int.TryParse(NightShiftDurationBox.Text, out var m)
+            ? Math.Clamp(m, 5, 1440)
+            : _engine.Config.NightShiftDurationMinutes;
+
+        NightShiftTimeBox.Text = timeText;
+        NightShiftDurationBox.Text = mins.ToString();
+        _engine.UpdateConfig(c =>
+        {
+            c.NightShiftStartTime = timeText;
+            c.NightShiftDurationMinutes = mins;
+        });
+    }
+
+    private void NightShiftProfile_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing || sender is not System.Windows.Controls.RadioButton radio || radio.Tag is not string tag)
+        {
+            return;
+        }
+
+        _engine.UpdateConfig(c => c.NightShiftProfileName = tag);
+    }
+
+    private void WifiFailoverSwitch_Click(object sender, RoutedEventArgs e)
+    {
+        SaveBackupSsid();
+        _engine.UpdateConfig(c => c.WifiFailoverEnabled = WifiFailoverSwitch.IsChecked == true);
+    }
+
+    private void SaveBackupSsid_Click(object sender, RoutedEventArgs e) => SaveBackupSsid();
+    private void BackupSsidBox_LostFocus(object sender, RoutedEventArgs e) => SaveBackupSsid();
+
+    private void SaveBackupSsid()
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        var ssid = (BackupSsidBox.Text ?? string.Empty).Trim();
+        if (!string.IsNullOrEmpty(ssid) && !NetworkFailoverPolicy.IsValidSsid(ssid))
+        {
+            BackupSsidBox.Text = _engine.Config.BackupWifiSsid;
+            return;
+        }
+
+        _engine.UpdateConfig(c => c.BackupWifiSsid = ssid);
+    }
+
+    private void AlertsSwitch_Click(object sender, RoutedEventArgs e)
+    {
+        SaveWebhookUrl();
+        _engine.UpdateConfig(c => c.AlertsEnabled = AlertsSwitch.IsChecked == true);
+    }
+
+    private void AlertFilterCheck_Click(object sender, RoutedEventArgs e) =>
+        _engine.UpdateConfig(c =>
+        {
+            c.AlertOnCompletion = AlertOnCompletionCheck.IsChecked == true;
+            c.AlertOnSafetyGuard = AlertOnGuardCheck.IsChecked == true;
+        });
+
+    private void SaveWebhookUrl_Click(object sender, RoutedEventArgs e) => SaveWebhookUrl();
+    private void WebhookUrlBox_LostFocus(object sender, RoutedEventArgs e) => SaveWebhookUrl();
+
+    private void SaveWebhookUrl()
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        var raw = (WebhookUrlBox.Text ?? string.Empty).Trim();
+        if (!string.IsNullOrEmpty(raw) && !WebhookPolicy.IsValidWebhookUrl(raw))
+        {
+            AlertStatusText.Text = "Must be an https:// non-local URL";
+            return;
+        }
+
+        _engine.UpdateConfig(c => c.AlertWebhookUrl = raw);
+        AlertStatusText.Text = string.IsNullOrEmpty(raw)
+            ? "Discord, Telegram, or HTTPS webhook"
+            : $"Saved ({WebhookPolicy.DetectProvider(raw)})";
+    }
+
+    private async void TestWebhook_Click(object sender, RoutedEventArgs e)
+    {
+        SaveWebhookUrl();
+        TestWebhookBtn.IsEnabled = false;
+        AlertStatusText.Text = "Sending test alert...";
+        try
+        {
+            var (_, msg) = await _alertNotifier.SendTestAlertAsync(_engine.Config);
+            AlertStatusText.Text = msg;
+        }
+        finally
+        {
+            TestWebhookBtn.IsEnabled = true;
+        }
     }
 
     private async void AutoUpdateSwitch_Click(object sender, RoutedEventArgs e)

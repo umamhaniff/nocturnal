@@ -441,6 +441,13 @@
                 </UniformGrid>
             </Border>
 
+            <!-- Scrollable Tab Content (keeps flyout compact on 14" 1080p @ 1.25x displays) -->
+            <ScrollViewer MaxHeight="520"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          PanningMode="VerticalOnly">
+                <StackPanel>
+
             <!-- TAB 1: TIMER -->
             <StackPanel x:Name="TimerPanel">
                 <!-- Radial Countdown Hero -->
@@ -493,11 +500,18 @@
                 </Grid>
 
                 <!-- Quick Duration Presets -->
-                <UniformGrid Columns="4" Margin="0,0,0,10">
+                <UniformGrid Columns="4" Margin="0,0,0,8">
                     <Button Content="+15m" Style="{StaticResource PresetButtonStyle}" Margin="0,0,4,0" Click="Preset15m_Click" />
                     <Button Content="+30m" Style="{StaticResource PresetButtonStyle}" Margin="2,0,2,0" Click="Preset30m_Click" />
                     <Button Content="+1h" Style="{StaticResource PresetButtonStyle}" Margin="2,0,2,0" Click="Preset1h_Click" />
                     <Button Content="+4h" Style="{StaticResource PresetButtonStyle}" Margin="4,0,0,0" Click="Preset4h_Click" />
+                </UniformGrid>
+
+                <!-- Quick Profiles -->
+                <UniformGrid Columns="3" Margin="0,0,0,10">
+                    <Button Content="AI Night" ToolTip="4h · Clamshell · Focus + Deep Pause" Style="{StaticResource PresetButtonStyle}" Padding="6,5" FontSize="11" Margin="0,0,4,0" Click="ProfileAi_Click" />
+                    <Button Content="Build" ToolTip="2h · Clamshell · Focus EcoQoS" Style="{StaticResource PresetButtonStyle}" Padding="6,5" FontSize="11" Margin="2,0,2,0" Click="ProfileBuild_Click" />
+                    <Button Content="Present" ToolTip="90m · Keep Display Awake · No Sleep" Style="{StaticResource PresetButtonStyle}" Padding="6,5" FontSize="11" Margin="4,0,0,0" Click="ProfilePresent_Click" />
                 </UniformGrid>
 
                 <!-- Custom Duration Strip -->
@@ -553,12 +567,19 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="WatchProcessBox"
                                      Style="{StaticResource DarkInputStyle}"
                                      KeyDown="WatchProcessBox_KeyDown"
-                                     Margin="0,0,8,0" />
+                                     Margin="0,0,6,0" />
                             <Button Grid.Column="1"
+                                    Content="Pick"
+                                    Padding="10,5"
+                                    Margin="0,0,6,0"
+                                    Style="{StaticResource PresetButtonStyle}"
+                                    Click="PickWatchProcess_Click" />
+                            <Button Grid.Column="2"
                                     Content="Watch"
                                     Padding="12,5"
                                     Style="{StaticResource PresetButtonStyle}"
@@ -710,6 +731,7 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="CustomAppsBox"
                                      Style="{StaticResource DarkInputStyle}"
@@ -717,6 +739,12 @@
                                      KeyDown="CustomAppsBox_KeyDown"
                                      Margin="0,0,6,0" />
                             <Button Grid.Column="1"
+                                    Content="Pick"
+                                    Style="{StaticResource PresetButtonStyle}"
+                                    Padding="10,5"
+                                    Margin="0,0,6,0"
+                                    Click="PickExtraApp_Click" />
+                            <Button Grid.Column="2"
                                     Content="Save"
                                     Style="{StaticResource PresetButtonStyle}"
                                     Padding="10,5"
@@ -736,6 +764,7 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="CustomWhitelistBox"
                                      Style="{StaticResource DarkInputStyle}"
@@ -743,6 +772,12 @@
                                      KeyDown="CustomWhitelistBox_KeyDown"
                                      Margin="0,0,6,0" />
                             <Button Grid.Column="1"
+                                    Content="Pick"
+                                    Style="{StaticResource PresetButtonStyle}"
+                                    Padding="10,5"
+                                    Margin="0,0,6,0"
+                                    Click="PickWhitelistApp_Click" />
+                            <Button Grid.Column="2"
                                     Content="Save"
                                     Style="{StaticResource PresetButtonStyle}"
                                     Padding="10,5"
@@ -846,6 +881,145 @@
                         BorderBrush="#222936"
                         BorderThickness="1"
                         CornerRadius="12"
+                        Padding="12,10"
+                        Margin="0,0,0,10">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Night Shift Schedule" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                                <TextBlock Text="Auto-start daily at scheduled time" FontSize="10.5" Foreground="#64748B" />
+                            </StackPanel>
+                            <CheckBox x:Name="NightShiftSwitch" Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" Click="NightShiftSwitch_Click" />
+                        </Grid>
+
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                                <TextBlock Text="Start (HH:mm)" FontSize="10" Foreground="#64748B" Margin="2,0,0,3" />
+                                <TextBox x:Name="NightShiftTimeBox" Text="22:00" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" LostFocus="NightShiftBox_LostFocus" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                                <TextBlock Text="Duration (mins)" FontSize="10" Foreground="#64748B" Margin="2,0,0,3" />
+                                <TextBox x:Name="NightShiftDurationBox" Text="240" TextAlignment="Center" Style="{StaticResource DarkInputStyle}" LostFocus="NightShiftBox_LostFocus" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Require AC power" FontSize="11.5" Foreground="#CBD5E1" VerticalAlignment="Center" />
+                            <CheckBox x:Name="NightShiftAcSwitch" Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" Click="NightShiftAcSwitch_Click" />
+                        </Grid>
+
+                        <Border Background="#0E121A" BorderBrush="#222936" BorderThickness="1" CornerRadius="8" Padding="3">
+                            <UniformGrid Columns="3">
+                                <RadioButton x:Name="NsAiRadio" Content="AI Night" Tag="AI Overnight" GroupName="NightShiftProfileGroup" Style="{StaticResource SegmentTabStyle}" Checked="NightShiftProfile_Checked" />
+                                <RadioButton x:Name="NsBuildRadio" Content="Build" Tag="Build / Scraper" GroupName="NightShiftProfileGroup" Style="{StaticResource SegmentTabStyle}" Checked="NightShiftProfile_Checked" />
+                                <RadioButton x:Name="NsPresentRadio" Content="Present" Tag="Presentation" GroupName="NightShiftProfileGroup" Style="{StaticResource SegmentTabStyle}" Checked="NightShiftProfile_Checked" />
+                            </UniformGrid>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="#151922"
+                        BorderBrush="#222936"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Padding="12,10"
+                        Margin="0,0,0,10">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Wi-Fi / Hotspot Failover" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                                <TextBlock Text="Switch to saved backup SSID if offline" FontSize="10.5" Foreground="#64748B" />
+                            </StackPanel>
+                            <CheckBox x:Name="WifiFailoverSwitch" Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" Click="WifiFailoverSwitch_Click" />
+                        </Grid>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="BackupSsidBox"
+                                     Style="{StaticResource DarkInputStyle}"
+                                     LostFocus="BackupSsidBox_LostFocus"
+                                     Margin="0,0,6,0" />
+                            <Button Grid.Column="1"
+                                    Content="Save"
+                                    Style="{StaticResource PresetButtonStyle}"
+                                    Padding="10,5"
+                                    Click="SaveBackupSsid_Click" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="#151922"
+                        BorderBrush="#222936"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Padding="12,10"
+                        Margin="0,0,0,10">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Phone / Webhook Alerts" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                                <TextBlock x:Name="AlertStatusText" Text="Discord, Telegram, or HTTPS webhook" FontSize="10.5" Foreground="#64748B" />
+                            </StackPanel>
+                            <CheckBox x:Name="AlertsSwitch" Grid.Column="1" Style="{StaticResource ToggleSwitchStyle}" Click="AlertsSwitch_Click" />
+                        </Grid>
+
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="WebhookUrlBox"
+                                     Style="{StaticResource DarkInputStyle}"
+                                     LostFocus="WebhookUrlBox_LostFocus"
+                                     Margin="0,0,6,0" />
+                            <Button Grid.Column="1"
+                                    Content="Save"
+                                    Style="{StaticResource PresetButtonStyle}"
+                                    Padding="9,5"
+                                    Margin="0,0,6,0"
+                                    Click="SaveWebhookUrl_Click" />
+                            <Button x:Name="TestWebhookBtn"
+                                    Grid.Column="2"
+                                    Content="Test"
+                                    Style="{StaticResource PresetButtonStyle}"
+                                    Padding="9,5"
+                                    Click="TestWebhook_Click" />
+                        </Grid>
+
+                        <UniformGrid Columns="2">
+                            <CheckBox x:Name="AlertOnCompletionCheck" Content="On completion" Foreground="#CBD5E1" FontSize="11" Cursor="Hand" Click="AlertFilterCheck_Click" />
+                            <CheckBox x:Name="AlertOnGuardCheck" Content="On safety guard" Foreground="#CBD5E1" FontSize="11" Cursor="Hand" Click="AlertFilterCheck_Click" />
+                        </UniformGrid>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="#151922"
+                        BorderBrush="#222936"
+                        BorderThickness="1"
+                        CornerRadius="12"
                         Padding="12,10">
                     <StackPanel>
                         <Grid Margin="0,0,0,10">
@@ -865,7 +1039,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
-                                <TextBlock x:Name="VersionText" Text="Nocturnal v1.2.0" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
+                                <TextBlock x:Name="VersionText" Text="Nocturnal v1.3.0" FontSize="12" FontWeight="SemiBold" Foreground="#F1F5F9" />
                                 <TextBlock x:Name="UpdateStatusText" Text="Check GitHub Releases" FontSize="10.5" Foreground="#64748B" />
                             </StackPanel>
                             <Button x:Name="CheckUpdateBtn"
@@ -879,6 +1053,8 @@
                     </StackPanel>
                 </Border>
             </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
 
             <!-- Community Footer: Star on GitHub + Support (Coffee Black Matte) -->
             <Border x:Name="CommunityFooterBorder"

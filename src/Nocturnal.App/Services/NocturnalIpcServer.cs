@@ -187,6 +187,23 @@ public sealed class NocturnalIpcServer : IDisposable
                 return new IpcResponse(true, $"Watching process '{status.WatchProcess}'.", status);
             }
 
+            case "profile":
+            {
+                if (string.IsNullOrWhiteSpace(req.ProfileName))
+                {
+                    return new IpcResponse(false, "Profile name is required.");
+                }
+
+                var applied = _engine.ApplyProfile(req.ProfileName, startImmediately: true);
+                if (applied is null)
+                {
+                    return new IpcResponse(false, $"Unknown profile '{req.ProfileName}'.");
+                }
+
+                var status = BuildStatusPayload();
+                return new IpcResponse(true, $"Profile '{applied.Name}' started ({applied.DurationMinutes}m).", status);
+            }
+
             case "screen-off":
                 _ = Task.Run(async () =>
                 {

@@ -11,7 +11,8 @@ public sealed record IpcRequest(
     bool? Clamshell = null,
     bool? AgentFocus = null,
     string? WatchProcess = null,
-    int? WatchPid = null);
+    int? WatchPid = null,
+    string? ProfileName = null);
 
 public sealed record IpcStatusPayload(
     bool IsActive,
@@ -192,6 +193,23 @@ public static class IpcCommandParser
                     AgentFocus: watchFocus,
                     WatchProcess: procName,
                     WatchPid: watchPid);
+                return true;
+
+            case "profile":
+                if (args.Length < 2)
+                {
+                    error = "Missing profile name. Options: AI Overnight, Build / Scraper, Presentation";
+                    return false;
+                }
+
+                var profileName = string.Join(' ', args.Skip(1)).Trim();
+                if (SchedulePolicy.FindProfile(profileName) is null)
+                {
+                    error = $"Unknown profile '{profileName}'. Options: AI Overnight, Build / Scraper, Presentation";
+                    return false;
+                }
+
+                request = new IpcRequest("profile", ProfileName: profileName);
                 return true;
 
             default:

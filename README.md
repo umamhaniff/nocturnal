@@ -58,8 +58,12 @@ Closing a Windows laptop lid immediately suspends long builds, web scrapers, loc
 | **One-Click Display Off** | Turns the display panel off instantly via `SC_MONITORPOWER` without triggering sleep—ideal for lid-open overnight runs or remote desktop. |
 | **Battery & Thermal Guards** | Engages Windows Energy Saver below `40%` battery (configurable) and forces an emergency stop + sleep at critical battery (`10%`) or thermal limits (graceful fallback when OEM firmware locks ACPI sensors). |
 | **Write-Ahead Crash Recovery** | Persists baseline power configuration and paused PIDs to `%LocalAppData%\Nocturnal\journal.json` prior to OS mutation, automatically restoring stale state on next startup. |
-| **CLI & Local IPC (`nocturnal-cli`)** | Control Nocturnal from any terminal or AI coding agent (`start`, `extend`, `watch`, `stop`, `status --json`, `history --json`, `screen-off`) over a current-user Named Pipe. |
+| **CLI & Local IPC (`nocturnal-cli`)** | Control Nocturnal from any terminal or AI coding agent (`start`, `extend`, `watch`, `profile`, `stop`, `status --json`, `history --json`, `screen-off`) over a current-user Named Pipe. |
 | **Live Telemetry & Session History** | Displays physical RAM reclaimed during Focus Mode plus recent session logs (duration, stop reason, battery delta, and RAM trimmed) in `%LocalAppData%\Nocturnal\history.json`. |
+| **Live Running-App Picker** | Browse active Session 1 processes with live RAM badges to pick targets for Watch Process, Extra Apps, or Agent Whitelist without typing executable names manually. |
+| **Quick Profiles & Night Shift** | Launch presets (`AI Overnight`, `Build / Scraper`, `Presentation`) in one click or schedule automatic daily Night Shift activation when plugged into AC power. |
+| **Wi-Fi / Hotspot Failover** | Monitors network connectivity during active sessions and switches to a saved backup SSID/hotspot (`netsh wlan connect`) if the primary connection drops. |
+| **Phone / Webhook Alerts** | Opt-in HTTPS alerts via Discord, Telegram, or generic webhooks when a session finishes or triggers a low-battery/thermal safety guard. |
 | **Midnight Glass Tray UI** | Borderless WPF flyout with a radial countdown ring, custom toggle switches, `Timer` / `Focus` / `Settings` tabs, 4 tray styles (`Pills`, `Compact`, `Minimal`, `Popover`), and dynamic **Crescent Pulse** tray icon states. |
 | **Auto-Detect & One-Click Updates** | Silently checks GitHub Releases for newer versions (opt-out in Settings), displays an instant tray alert and top update banner, verifies SHA-256 checksums, downloads over HTTPS, and upgrades silently with automatic relaunch. |
 | **Ultra-Light Footprint** | Pure `.NET 9` WPF + Win32 P/Invoke architecture—zero Electron, zero WebView2, low memory overhead on 8 GB systems. |
@@ -97,7 +101,7 @@ Start Session
           └── Resume verified suspended PIDs -> Restore EcoQoS -> Restore LIDACTION -> Clear journal
 ```
 
-- **100% Local & Private:** Zero telemetry, zero analytics, and zero tracking. Configuration and recovery state remain strictly inside `%LocalAppData%\Nocturnal\`. Outbound network access is limited to optional GitHub Releases update checks (toggleable under Settings).
+- **100% Local & Private:** Zero telemetry, zero analytics, and zero tracking. Configuration, journal, and session history stay strictly inside `%LocalAppData%\Nocturnal\`. Outbound network access is limited to optional GitHub Releases update checks and user-configured HTTPS webhook alerts (both off/toggleable under Settings).
 - **PID-Reuse Safe Recovery:** On unexpected exit recovery, Nocturnal matches both `PID` and exact process `StartTimeUtc` (±2s) before calling `NtResumeProcess`, preventing accidental operations on recycled OS PIDs.
 
 ---
@@ -105,13 +109,13 @@ Start Session
 ## Installation
 
 ### Option 1: Windows Installer (Recommended — No .NET Runtime Required)
-1. Download the latest `Nocturnal-Setup-1.2.0.exe` from [**GitHub Releases**](https://github.com/umamhaniff/nocturnal/releases/latest).
+1. Download the latest `Nocturnal-Setup-1.3.0.exe` from [**GitHub Releases**](https://github.com/umamhaniff/nocturnal/releases/latest).
 2. Run the installer—installs per-user by default (no administrator prompt required), registers a Start Menu shortcut, adds `nocturnal-cli` to your user `PATH`, optional startup autostart, and a clean uninstaller.
 
 Silent per-user installation / upgrade:
 
 ```powershell
-.\Nocturnal-Setup-1.2.0.exe /VERYSILENT /CURRENTUSER
+.\Nocturnal-Setup-1.3.0.exe /VERYSILENT /CURRENTUSER
 ```
 
 ### Terminal & AI Agent CLI (`nocturnal-cli`)
@@ -145,7 +149,7 @@ dotnet run --project tests/Nocturnal.Tests
 # Run from source
 dotnet run --project src/Nocturnal.App
 
-# Build self-contained win-x64 installer -> dist\Nocturnal-Setup-1.2.0.exe
+# Build self-contained win-x64 installer -> dist\Nocturnal-Setup-1.3.0.exe
 .\scripts\build-installer.ps1
 
 # Or publish framework-dependent single-file portable executable

@@ -28,7 +28,8 @@
 | Agent Isolation / Background Throttling | **Agent Focus Mode v1.1**: Process-Tree Inheritance (`CreateToolhelp32Snapshot`, berhenti di `explorer`/`svchost`) + Path-Based OS/Driver Protection (`QueryFullProcessImageNameW`), Windows 11 EcoQoS + `K32EmptyWorkingSet` RAM Trim, serta opt-in **Deep Pause** (`NtSuspendProcess`/`NtResumeProcess` + crash-safe `SuspendedProcesses` journal) atau **Graceful Close** (`CloseMainWindow`) |
 | Self-Update | **Auto-Detect + One-Click Update**: `UpdatePolicy` (`Nocturnal.Core`) + `AppUpdateService` memeriksa GitHub Releases `/latest` saat startup (+8s, lalu tiap 12 jam; toggleable di Settings), memverifikasi domain HTTPS + SHA-256 digest asset `Nocturnal-Setup-*.exe`, men-download ke `%LocalAppData%\Nocturnal\updates\`, menghentikan sesi & melepas mutex secara aman, lalu menjalankan Inno Setup `/VERYSILENT /RELAUNCH=1` |
 | Terminal / AI Agent Control & Display Off | **v1.2 Suite**: `nocturnal-cli.exe` + `NocturnalIpcServer` (`Nocturnal_Ipc_v1` current-user Named Pipe), **Process-Watcher** (`WindowsProcessWatcher`, grace period 15s, safety ceiling 12h), **One-Click Display Off** (`SendNotifyMessageW SC_MONITORPOWER`), serta **Live RAM Reclaimed Telemetry & Session History** (`%LocalAppData%\Nocturnal\history.json`) |
-| Hotspot Handoff / Tmux / Browser Helper | Modular automation hooks (Phase 2+) |
+| Unattended Remote & UX Publik | **v1.3 Suite**: **Phone/Webhook Alerts** (`WebhookPolicy` + `HttpAlertNotifier` Discord/Telegram/HTTPS), **Live Running-App Picker** (`AppPickerWindow` modal), **Auto Wi-Fi / Hotspot Failover** (`NetworkFailoverPolicy` + `WindowsWifiFailoverController`), serta **Scheduled Night Shift & Quick Profiles** (`SchedulePolicy`: `AI Overnight`, `Build / Scraper`, `Presentation`) |
+| Hotspot Handoff / Tmux / Browser Helper | Modular automation hooks (Phase 3+) |
 
 ---
 
@@ -42,7 +43,7 @@ Nocturnal/
 ├── Nocturnal.sln
 ├── assets/                     # Crescent Pulse SVG brand assets (active & off)
 ├── .github/                    # GitHub FUNDING.yml (Trakteer)
-├── installer/                  # Inno Setup 6 script (Nocturnal.iss -> dist/Nocturnal-Setup-1.2.0.exe)
+├── installer/                  # Inno Setup 6 script (Nocturnal.iss -> dist/Nocturnal-Setup-1.3.0.exe)
 ├── scripts/                    # Installer build automation (build-installer.ps1)
 ├── src/
 │   ├── Nocturnal.Core/         # Pure domain models, IPC protocol, safety rules, session engine

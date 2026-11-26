@@ -23,6 +23,7 @@ public partial class App : System.Windows.Application
     private RegisteredWaitHandle? _gracefulExitWaitHandle;
     private SessionEngine? _engine;
     private AppUpdateService? _updateService;
+    private HttpAlertNotifier? _alertNotifier;
     private NocturnalIpcServer? _ipcServer;
     private TrayIconService? _trayIcon;
     private MainPopupWindow? _popup;
@@ -70,6 +71,8 @@ public partial class App : System.Windows.Application
         _updateService = new AppUpdateService();
         _updateService.CleanupStaleUpdateFiles();
 
+        _alertNotifier = new HttpAlertNotifier();
+
         _engine = new SessionEngine(
             new Win32PowerController(),
             new WindowsSystemMonitor(),
@@ -77,7 +80,9 @@ public partial class App : System.Windows.Application
             new FileConfigStore(),
             focusController: new WindowsAgentFocusController(),
             processWatcher: new WindowsProcessWatcher(),
-            historyStore: new FileSessionHistoryStore());
+            historyStore: new FileSessionHistoryStore(),
+            alertNotifier: _alertNotifier,
+            networkFailover: new WindowsWifiFailoverController());
 
         // Restore any stale power state from a previous crash, then populate initial telemetry.
         _engine.RecoverIfNeeded();
@@ -95,6 +100,7 @@ public partial class App : System.Windows.Application
         _popup = new MainPopupWindow(
             _engine,
             _updateService,
+            _alertNotifier,
             ExitApplication,
             PrepareForInstallerExit,
             () => Dispatcher.BeginInvoke(() => Shutdown()));

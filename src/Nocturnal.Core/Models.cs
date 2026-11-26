@@ -59,6 +59,29 @@ public sealed record ProcessWatchTarget(
     string ProcessName,
     int? Pid = null);
 
+public sealed record RunningAppInfo(
+    string ProcessName,
+    int InstanceCount,
+    long TotalWorkingSetBytes,
+    bool IsProtectedByDefault);
+
+public sealed record WebhookAlertEvent(
+    string EventType,
+    string Title,
+    string Message,
+    DateTimeOffset TimestampUtc,
+    int? BatteryPercent,
+    double ReclaimedRamMb);
+
+public sealed record SessionProfile(
+    string Name,
+    int DurationMinutes,
+    bool ClamshellEnabled,
+    bool AgentFocusEnabled,
+    SelectedAppMode SelectedAppMode,
+    bool KeepDisplayAwake,
+    bool AutoSleepOnCompletion);
+
 public sealed record FocusReport(
     bool IsEngaged,
     int ThrottledProcessCount,
@@ -126,6 +149,17 @@ public sealed class AppConfig
     public List<string> CustomAppsToManage { get; set; } = [];
     public List<string> CustomAgentWhitelist { get; set; } = [];
     public bool AutoCheckForUpdates { get; set; } = true;
+    public bool AlertsEnabled { get; set; } = false;
+    public string AlertWebhookUrl { get; set; } = string.Empty;
+    public bool AlertOnCompletion { get; set; } = true;
+    public bool AlertOnSafetyGuard { get; set; } = true;
+    public bool WifiFailoverEnabled { get; set; } = false;
+    public string BackupWifiSsid { get; set; } = string.Empty;
+    public bool NightShiftEnabled { get; set; } = false;
+    public string NightShiftStartTime { get; set; } = "22:00";
+    public int NightShiftDurationMinutes { get; set; } = 240;
+    public bool NightShiftRequireAcPower { get; set; } = true;
+    public string NightShiftProfileName { get; set; } = "AI Overnight";
 }
 
 public sealed record UpdateReleaseInfo(
@@ -149,4 +183,6 @@ public sealed record SessionStatus(
     bool LowPowerEngaged,
     StopReason LastStopReason,
     FocusReport Focus,
-    ProcessWatchTarget? WatchTarget = null);
+    ProcessWatchTarget? WatchTarget = null,
+    string? ActiveProfileName = null,
+    bool WifiFailoverTriggered = false);

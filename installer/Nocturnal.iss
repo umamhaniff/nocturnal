@@ -1,5 +1,5 @@
 #define MyAppName "Nocturnal"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "Hans x Gravi"
 #define MyAppURL "https://github.com/umamhaniff/nocturnal"
 #define MyAppExeName "Nocturnal.exe"

@@ -155,6 +155,7 @@ internal static class Program
           nocturnal-cli start <duration> [--clamshell|--no-clamshell] [--focus|--no-focus]
           nocturnal-cli extend <duration>
           nocturnal-cli watch <process> [--pid <id>] [--max <duration>] [--clamshell|--no-clamshell] [--focus|--no-focus]
+          nocturnal-cli profile <AI Overnight | Build / Scraper | Presentation>
           nocturnal-cli stop
           nocturnal-cli status [--json]
           nocturnal-cli history [--json]
